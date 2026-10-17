@@ -1,0 +1,24 @@
+{
+  "owner": "Alex",
+  "language": "English",
+  "vault": "C:\\Users\\you\\ObsidianVault",
+  "notes_subfolder": "Instagram",
+  "home_note": null,
+  "home_assistant": {"url": "http://homeassistant.local:8123", "token_env": "HA_TOKEN"},
+  "ollama": {"url": "http://localhost:11434", "model": "qwen3:8b"},
+  "backlog_per_run": 15,
+  "max_new_per_run": 25,
+  "profile": "About Alex: software developer. Homelab: Home Assistant on a mini-PC, a NAS with Jellyfin, a Windows PC with a GPU running Ollama. Prefers self-hosted, free tools.",
+  "collections": [
+    ["Work", "idea"],
+    ["Places", "plan"],
+    ["Quotes", "personal"],
+    ["Music", "music"]
+  ],
+  "modes": {
+    "idea": {"folder": "Ideas Instagram", "about": "ideas to implement from the «Work» collection"},
+    "plan": {"folder": "Plans Instagram", "about": "places and things to do"},
+    "personal": {"folder": "Personal Instagram", "about": "quotes and reflections"},
+    "music": {"folder": "Music Instagram", "about": "saved songs and artists"}
+  }
+}

@@ -1,0 +1,81 @@
+# Instagram saved → Obsidian
+
+Turn the posts you save on Instagram into useful notes, every day, automatically.
+
+You save a reel because it shows a GitHub repo, a tool, a place to visit, a quote that hit you or a song.
+Then it sits in «Saved» forever. This script reads your **saved collections** (read-only), works out
+what each post is actually about and files it in your **Obsidian** vault, with an optional
+**Home Assistant** notification for the ones you want to act on.
+
+| Mode | What you get in the note |
+| --- | --- |
+| `idea` | What the tool/repo is (exact URL), how it fits **your** setup, concrete implementation steps, effort/value. Non-tech posts are skipped. |
+| `plan` | What, where (with a map link), when, price, practical tips. |
+| `personal` | The exact quote / key sentence and the core message. |
+| `music` | Artist, song and a link to listen. |
+| `private` | One neutral, non-explicit line. |
+
+Each collection is mapped to a mode in `config.json`, in priority order.
+
+## How it works
+
+1. **Instagram, read-only** — [instagrapi](https://github.com/subzeroid/instagrapi) with a saved session
+   (no password stored, no likes/follows/comments, human-like pauses). The full list of each collection is
+   read once and cached; daily runs only fetch the newest page.
+2. **Understanding the post** — caption + transcript of the audio with
+   [faster-whisper](https://github.com/SYSTRAN/faster-whisper) (GPU if available) + a few frames, so
+   on-screen text such as repo names or addresses is read too.
+3. **Brain** — [Claude Code](https://docs.anthropic.com/en/docs/claude-code) in headless mode
+   (`claude -p` with a JSON schema, can web-search to confirm a repo or a place). If it fails, for example
+   because you are out of usage, it falls back to a local model in [Ollama](https://ollama.com).
+4. **Output** — one Markdown note per post with front-matter, one index note per mode (an Obsidian `base`
+   table), and one daily Home Assistant notification for `idea`/`plan` items.
+
+Every run processes all **new** saves plus up to `backlog_per_run` older ones, so a big backlog is
+worked through gradually instead of hammering Instagram (or your Claude usage) in one go.
+
+## Setup
+
+```bash
+git clone https://github.com/mauriporte/instagram-saved-to-obsidian
+cd instagram-saved-to-obsidian
+python -m venv venv && venv/Scripts/pip install -r requirements.txt    # Linux/macOS: venv/bin/pip
+# NVIDIA GPU (optional): venv/Scripts/pip install nvidia-cublas-cu12 "nvidia-cudnn-cu12>=9,<10"
+cp config.example.json config.json   # then edit it
+```
+
+- **Instagram session**: log into instagram.com in your browser, copy the `sessionid` cookie and run
+  `python import_session.py`. (`login.py` does a username/password/2FA login instead; the password is not saved.)
+- **Claude Code** must be installed and logged in (`claude` on PATH). Ollama is optional.
+- **Home Assistant** (optional): a long-lived token in the environment variable named in
+  `home_assistant.token_env` (default `HA_TOKEN`).
+
+Try it without writing anything:
+
+```bash
+python ideas.py --dry-run --backlog 2
+```
+
+Then schedule it daily (Windows Task Scheduler, cron, …): `python ideas.py`.
+
+## Configuration (`config.json`)
+
+| Key | Meaning |
+| --- | --- |
+| `owner`, `language` | Who saved the posts and the language of the notes. |
+| `profile` | A few lines about you and your setup, so ideas are judged for fit. |
+| `vault`, `notes_subfolder`, `home_note` | Where the notes go; `home_note` (optional) gets a link to each index. |
+| `collections` | `[collection name, mode]` pairs in priority order (names match ignoring case/accents). |
+| `modes` | Optional overrides per mode: `folder`, `emoji`, `notify`, `about`. |
+| `backlog_per_run`, `max_new_per_run` | How many older / new items per run. |
+| `home_assistant`, `ollama` | URLs, token variable and fallback model. |
+
+## Notes
+
+- Uses Instagram's private API through instagrapi; keep the frequency low (once a day) and read-only.
+  Use at your own risk with your own account.
+- Note headings are in Spanish for now (`Qué es`, `Cómo implementarlo`, …); PRs welcome.
+
+## License
+
+MIT

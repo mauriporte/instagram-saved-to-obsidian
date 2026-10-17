@@ -1,0 +1,11 @@
+# personal / secrets
+config.json
+session.json
+state.json
+_cookie.json
+*.log
+# runtime
+venv/
+browser/
+insta_*/
+__pycache__/

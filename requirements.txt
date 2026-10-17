@@ -1,0 +1,5 @@
+instagrapi>=2.1
+faster-whisper>=1.1
+av<16  # faster-whisper still passes metadata_errors to av.open
+requests>=2.31
+# GPU (optional, NVIDIA): nvidia-cublas-cu12 and nvidia-cudnn-cu12 (cuDNN 9)
