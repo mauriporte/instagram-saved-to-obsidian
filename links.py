@@ -177,6 +177,16 @@ def heartbeat(st):
         log("[links] heartbeat error:", type(e).__name__)
 
 
+LAST_START = [0.0]  # the new scan takes a few seconds to take its lock; don't start another meanwhile
+
+
+def start_scan(*args):
+    LAST_START[0] = time.time()
+    subprocess.Popen([sys.executable, os.path.join(ideas.HERE, "ideas.py"), *args], cwd=ideas.HERE,
+                     stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                     creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+
+
 def scan_button(st):
     """Starts ideas.py when the Home Assistant scan button ("scan_button") was pressed and no scan is running."""
     ent = ideas.CFG.get("scan_button")
@@ -189,9 +199,14 @@ def scan_button(st):
         st["scan_button_seen"] = pressed; save_state(st)
         if not first and not ideas.scan_running():
             log("[links] scan button pressed: starting ideas.py")
-            subprocess.Popen([sys.executable, os.path.join(ideas.HERE, "ideas.py")], cwd=ideas.HERE,
-                             stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+            start_scan()
+            return
+    sw = ideas.CFG.get("continuous_switch")  # "Continuo": keep starting scans until it is turned off
+    if sw and time.time() - LAST_START[0] > 90 and not ideas.scan_running():
+        c = ha("GET", f"states/{sw}")
+        if c.ok and c.json().get("state") == "on":
+            log("[links] continuous mode: starting the next scan")
+            start_scan("--continuous")
             return
     s = ha("GET", f"states/{ideas.SCAN_SENSOR}")  # missing after an HA restart, or stale after a crashed scan
     if (s.status_code == 404 or (s.ok and s.json()["attributes"].get("running"))) and not ideas.scan_running():

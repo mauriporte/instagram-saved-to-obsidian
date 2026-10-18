@@ -7,7 +7,7 @@
 #   private   -> one neutral line, separate folder; Obsidian only
 # Every run: all NEW saves (since the first run) + up to `backlog_per_run` older items, in collection priority order.
 # Brain: Claude Code headless (your subscription); if it fails (e.g. out of usage) -> local Ollama.
-# Everything personal lives in config.json (see config.example.json). Run: python ideas.py [--backlog N] [--only NAME] [--newest-first | --oldest-first] [--dry-run]
+# Everything personal lives in config.json (see config.example.json). Run: python ideas.py [--backlog N] [--only NAME] [--newest-first | --oldest-first] [--continuous] [--dry-run]
 import base64, datetime as dt, json, os, re, shutil, subprocess, sys, tempfile, traceback, unicodedata, urllib.parse
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -23,7 +23,8 @@ BACKLOG = int(arg("--backlog", CFG.get("backlog_per_run", 15)))  # older items p
 MAX_NEW = int(CFG.get("max_new_per_run", 25))                    # safety cap for new saves per run
 ONLY = arg("--only", None)
 DRY = "--dry-run" in sys.argv
-ORDER_ARG = "newest" if "--newest-first" in sys.argv else "oldest" if "--oldest-first" in sys.argv else None
+CONTINUOUS = "--continuous" in sys.argv  # started by links.py's continuous switch: reuse a recent Instagram sync
+ORDER_ARG ="newest" if "--newest-first" in sys.argv else "oldest" if "--oldest-first" in sys.argv else None
 VAULT = CFG["vault"]
 NOTES_DIR = CFG.get("notes_subfolder", "")          # folder inside the vault for the per-mode folders
 BASE = os.path.join(VAULT, NOTES_DIR)
@@ -487,7 +488,13 @@ def scan():
     done = set(state["done"])
     save = lambda: DRY or json.dump(state | {"done": sorted(done)}, open(STATE, "w", encoding="utf-8"), ensure_ascii=False)
     cl = client()
-    sync(cl, state); save()
+    last = dt.datetime.fromisoformat(state["last_sync"]) if state.get("last_sync") else None
+    if CONTINUOUS and last and dt.datetime.now() - last < dt.timedelta(hours=6):
+        log("continuous: Instagram list synced at", state["last_sync"], "- reusing it")  # back-to-back scans don't re-sync
+    else:
+        sync(cl, state)
+        state["last_sync"] = dt.datetime.now().isoformat(timespec="seconds")
+    save()
     newest_first = run_order() == "newest"
     queue_new, queue_old = [], []
     for name, mode in COLLECTIONS:
@@ -504,16 +511,29 @@ def scan():
     results = []
     for name, mode in dict.fromkeys((n, m) for n, m, _ in queue):
         ensure_index(mode)
+    ok = 0
     for n, (name, mode, it) in enumerate(queue):
         progress(f"{round(100 * n / len(queue))} % ({n}/{len(queue)})", n, len(queue))
         d = process(cl, name, mode, it, done)
         save()
+        ok += bool(d)
         if d and MODES[mode]["notify"]:
             results.append((mode, d, it["pk"]))
     for mode, d, pk in results:  # one notification per idea/plan
         notify_item(mode, d, pk)
-    json.dump({"last_scan": dt.datetime.now().isoformat(timespec="minutes"), "last_result": f"{len(queue)} procesados"},
+    json.dump({"last_scan": dt.datetime.now().isoformat(timespec="minutes"), "last_result": f"{ok}/{len(queue)} procesados"},
               open(LAST_SCAN, "w", encoding="utf-8"), ensure_ascii=False)
+    if CONTINUOUS and not ok:  # backlog done, or only posts that keep failing: stop instead of looping all night
+        stop_continuous("nada pendiente" if not queue else f"{len(queue)} pendientes fallan siempre")
+
+
+def stop_continuous(why):
+    ent = CFG.get("continuous_switch")
+    if DRY or not (HA and ent):
+        return
+    requests.post(f"{HA}/api/services/input_boolean/turn_off", headers={"Authorization": "Bearer " + ha_token()},
+                  json={"entity_id": ent}, timeout=20)
+    notify("💡 Insta-Ideas: modo continuo apagado", f"Se apagó solo: {why}.", "insta_continuous_off")
 
 
 def notify_item(mode, d, pk):
