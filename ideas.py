@@ -23,9 +23,7 @@ BACKLOG = int(arg("--backlog", CFG.get("backlog_per_run", 15)))  # older items p
 MAX_NEW = int(CFG.get("max_new_per_run", 25))                    # safety cap for new saves per run
 ONLY = arg("--only", None)
 DRY = "--dry-run" in sys.argv
-ORDER = "newest" if "--newest-first" in sys.argv else "oldest" if "--oldest-first" in sys.argv else CFG.get("order", "oldest")
-assert ORDER in ("oldest", "newest"), f'config "order" must be "oldest" or "newest", not {ORDER!r}'
-NEWEST_FIRST = ORDER == "newest"
+ORDER_ARG = "newest" if "--newest-first" in sys.argv else "oldest" if "--oldest-first" in sys.argv else None
 VAULT = CFG["vault"]
 NOTES_DIR = CFG.get("notes_subfolder", "")          # folder inside the vault for the per-mode folders
 BASE = os.path.join(VAULT, NOTES_DIR)
@@ -104,6 +102,22 @@ def ha_token():
         t = subprocess.run(["powershell", "-NoProfile", "-c", f'[Environment]::GetEnvironmentVariable("{HA_TOKEN_ENV}","User")'],
                            capture_output=True, text=True).stdout.strip()
     return t
+
+
+def run_order():
+    """--oldest-first/--newest-first > Home Assistant selector ("order_entity": 1st option = oldest, 2nd = newest) > "order"."""
+    if ORDER_ARG:
+        return ORDER_ARG
+    ent = CFG.get("order_entity")
+    if HA and ent:
+        try:
+            s = requests.get(f"{HA}/api/states/{ent}", headers={"Authorization": "Bearer " + ha_token()}, timeout=20).json()
+            return ("oldest", "newest")[s["attributes"]["options"].index(s["state"])]
+        except Exception as e:
+            log(f"order: {ent} unreadable ({type(e).__name__}), using config")
+    order = CFG.get("order", "oldest")
+    assert order in ("oldest", "newest"), f'config "order" must be "oldest" or "newest", not {order!r}'
+    return order
 
 
 def notify(title, message, nid):
@@ -414,18 +428,19 @@ def main():
     save = lambda: DRY or json.dump(state | {"done": sorted(done)}, open(STATE, "w", encoding="utf-8"), ensure_ascii=False)
     cl = client()
     sync(cl, state); save()
+    newest_first = run_order() == "newest"
     queue_new, queue_old = [], []
     for name, mode in COLLECTIONS:
         c = state["collections"].get(name)
         if not c:
             continue
         base = set(c["baseline"] or [])
-        for it in (c["items"] if NEWEST_FIRST else reversed(c["items"])):  # items are stored newest first
+        for it in (c["items"] if newest_first else reversed(c["items"])):  # items are stored newest first
             if it["pk"] in done:
                 continue
             (queue_old if it["pk"] in base else queue_new).append((name, mode, it))
     queue = queue_new[:MAX_NEW] + queue_old[:BACKLOG]
-    log(f"queue: {len(queue_new)} new, {len(queue_old)} backlog -> processing {len(queue)}")
+    log(f"queue ({'newest' if newest_first else 'oldest'} first): {len(queue_new)} new, {len(queue_old)} backlog -> processing {len(queue)}")
     results = []
     for name, mode in dict.fromkeys((n, m) for n, m, _ in queue):
         ensure_index(mode)
