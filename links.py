@@ -9,7 +9,7 @@ transcribed with Whisper plus a few frames; other pages (articles, GitHub) are r
 Each link gives an idea note (same folder and format as ideas.py) and its own Home Assistant notification.
 Run: python links.py [--once] [--url URL]   (default: keep watching every config "interval" seconds)
 """
-import datetime as dt, json, os, re, shutil, sys, tempfile, time, traceback
+import datetime as dt, json, os, re, shutil, subprocess, sys, tempfile, time, traceback
 import ideas  # config, Instagram session, Whisper, Claude/Ollama, note writer and notifications
 from ideas import log, requests
 import vault_sync  # HA «Ideas» list + Markdown dashboards, refreshed every cycle
@@ -177,6 +177,27 @@ def heartbeat(st):
         log("[links] heartbeat error:", type(e).__name__)
 
 
+def scan_button(st):
+    """Starts ideas.py when the Home Assistant scan button ("scan_button") was pressed and no scan is running."""
+    ent = ideas.CFG.get("scan_button")
+    if not ent or not ideas.HA:
+        return
+    r = ha("GET", f"states/{ent}")
+    pressed = r.json().get("state") if r.ok else None
+    if pressed and pressed != st.get("scan_button_seen"):
+        first = "scan_button_seen" not in st  # first look: remember the last press, don't act on it
+        st["scan_button_seen"] = pressed; save_state(st)
+        if not first and not ideas.scan_running():
+            log("[links] scan button pressed: starting ideas.py")
+            subprocess.Popen([sys.executable, os.path.join(ideas.HERE, "ideas.py")], cwd=ideas.HERE,
+                             stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+            return
+    s = ha("GET", f"states/{ideas.SCAN_SENSOR}")  # missing after an HA restart, or stale after a crashed scan
+    if (s.status_code == 404 or (s.ok and s.json()["attributes"].get("running"))) and not ideas.scan_running():
+        ideas.progress("Inactivo", running=False)
+
+
 def main():
     st = load_state()
     if "--url" in sys.argv:
@@ -190,7 +211,12 @@ def main():
         heartbeat(st)
         if "--once" in sys.argv:
             return
-        time.sleep(int(CFG.get("interval", 120)))
+        for _ in range(max(1, int(CFG.get("interval", 120)) // 10)):  # the scan button is checked every 10 s
+            try:
+                scan_button(st)
+            except Exception:
+                log("[links] scan_button error:", traceback.format_exc().splitlines()[-1])
+            time.sleep(10)
 
 
 if __name__ == "__main__":

@@ -69,6 +69,7 @@ Then schedule it daily (Windows Task Scheduler, cron, …): `python ideas.py`.
 | `modes` | Optional overrides per mode: `folder`, `emoji`, `notify`, `about`. |
 | `backlog_per_run`, `max_new_per_run` | How many older / new items per run. |
 | `order` | `"oldest"` (default) or `"newest"`: which saves go first. `--oldest-first` / `--newest-first` override it for one run. |
+| `scan_button` | Optional Home Assistant `input_button`: pressing it makes `links.py` start a scan (if none is running). Progress is published as `sensor.insta_ideas_escaneo`. |
 | `order_entity` | Optional Home Assistant `input_select` that overrides `order`: its 1st option means oldest first, its 2nd newest first. |
 | `home_assistant`, `ollama` | URLs, token variable and fallback model. |
 

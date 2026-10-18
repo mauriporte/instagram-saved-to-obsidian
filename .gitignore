@@ -12,3 +12,5 @@ browser/
 insta_*/
 link_*/
 __pycache__/
+scan.lock
+last_scan.json

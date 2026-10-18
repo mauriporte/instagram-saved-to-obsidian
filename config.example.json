@@ -16,6 +16,7 @@
   "max_new_per_run": 25,
   "order": "oldest",
   "order_entity": null,
+  "scan_button": null,
   "profile": "About Alex: software developer. Homelab: Home Assistant on a mini-PC, a NAS with Jellyfin, a Windows PC with a GPU running Ollama. Prefers self-hosted, free tools.",
   "collections": [
     [

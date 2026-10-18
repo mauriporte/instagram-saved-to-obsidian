@@ -120,6 +120,49 @@ def run_order():
     return order
 
 
+SCAN_SENSOR = "sensor.insta_ideas_escaneo"
+LAST_SCAN = os.path.join(HERE, "last_scan.json")
+
+
+def scan_lock():
+    """Held for the whole scan; the OS frees it if the process dies. Returns None if another scan holds it."""
+    f = open(os.path.join(HERE, "scan.lock"), "a+")
+    try:
+        if os.name == "nt":
+            import msvcrt; f.seek(0); msvcrt.locking(f.fileno(), msvcrt.LK_NBLCK, 1)
+        else:
+            import fcntl; fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        return f
+    except OSError:
+        f.close(); return None
+
+
+def scan_running():
+    f = scan_lock()
+    if f:
+        f.close()  # closing releases the lock
+    return f is None
+
+
+def progress(text, done=0, total=0, running=True):
+    """Publishes the scan state as sensor.insta_ideas_escaneo (the Ideas dashboard's scan button)."""
+    if DRY or not HA:
+        return
+    last = {}
+    if not running:
+        try:
+            last = json.load(open(LAST_SCAN, encoding="utf-8"))
+        except (OSError, ValueError):
+            pass
+    try:
+        requests.post(f"{HA}/api/states/{SCAN_SENSOR}", headers={"Authorization": "Bearer " + ha_token()}, timeout=20, json={
+            "state": text, "attributes": {"friendly_name": "Escaneo Insta-Ideas", "icon": "mdi:radar" if running else "mdi:play-circle",
+                                          "running": running, "done": done, "total": total,
+                                          "percent": round(100 * done / total) if total else 0, **last}})
+    except Exception as e:
+        log("scan sensor error:", type(e).__name__)
+
+
 def notify(title, message, nid):
     if DRY or not HA:
         log("[notify]" if HA else "[no Home Assistant configured]", title, "|", message.replace("\n", " / ")); return
@@ -422,6 +465,23 @@ def process(cl, collection, mode, it, done):
 
 # ---------- main ----------
 def main():
+    lock = scan_lock()
+    if not lock:
+        log("another scan is already running; exiting"); return
+    try:
+        scan()
+    except Exception:
+        log("scan FAILED", traceback.format_exc().splitlines()[-1])
+        json.dump({"last_scan": dt.datetime.now().isoformat(timespec="minutes"), "last_result": "error"},
+                  open(LAST_SCAN, "w", encoding="utf-8"))
+        raise
+    finally:
+        progress("Inactivo", running=False)
+        lock.close()
+
+
+def scan():
+    progress("Sincronizando Instagram…")
     state = json.load(open(STATE, encoding="utf-8")) if os.path.exists(STATE) else {}
     state.setdefault("collections", {}); state.setdefault("done", [])
     done = set(state["done"])
@@ -444,13 +504,16 @@ def main():
     results = []
     for name, mode in dict.fromkeys((n, m) for n, m, _ in queue):
         ensure_index(mode)
-    for name, mode, it in queue:
+    for n, (name, mode, it) in enumerate(queue):
+        progress(f"{round(100 * n / len(queue))} % ({n}/{len(queue)})", n, len(queue))
         d = process(cl, name, mode, it, done)
         save()
         if d and MODES[mode]["notify"]:
             results.append((mode, d, it["pk"]))
     for mode, d, pk in results:  # one notification per idea/plan
         notify_item(mode, d, pk)
+    json.dump({"last_scan": dt.datetime.now().isoformat(timespec="minutes"), "last_result": f"{len(queue)} procesados"},
+              open(LAST_SCAN, "w", encoding="utf-8"), ensure_ascii=False)
 
 
 def notify_item(mode, d, pk):
