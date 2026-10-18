@@ -87,9 +87,10 @@ Send any link and it is filed as an idea, with the same analysis, note format an
 - **Inputs** (`config.json` → `links`):
   - `todo`: a Home Assistant to-do list (e.g. a Local To-do called "Ideas: enlaces"). Add an item with a link from
     the app or the web; it is ticked when processed, with the idea's title added to it.
-  - `beeper_chats` + `beeper_token`: chat titles in Beeper Desktop (e.g. a Telegram/WhatsApp group "Ideas" with only
-    you). Every new link posted there is processed and answered with "💡 Idea guardada: …". Covers every network
-    Beeper bridges, no bots needed. Create the token in Beeper Desktop → Settings → Developers.
+  - `beeper_chats` + `beeper_token`: chat titles in Beeper Desktop, e.g. Beeper's own "Note to self" (on the phone
+    too). Every new link posted there is processed and answered with "💡 Idea guardada: …". Covers every network
+    Beeper bridges, no bots needed. Get the token with `python beeper_auth.py` (OAuth with Beeper Desktop: approve
+    the request it opens; the token lasts 30 days, and links.py sends a Home Assistant notification when it expires).
 - **Per link**: Instagram posts use the saved session; anything yt-dlp downloads (YouTube, TikTok, X…) is transcribed
   (audio) and sampled (frames), downloaded as separate audio and video files so no ffmpeg is needed; other pages
   (articles, GitHub) are read by Claude with WebFetch. Links are always filed, even if judged not relevant.
@@ -99,5 +100,5 @@ Send any link and it is filed as an idea, with the same analysis, note format an
 
 ```json
 "links": {"todo": "todo.ideas_enlaces", "collection": "Enlaces", "interval": 120,
-          "beeper_url": "http://localhost:23373", "beeper_token": "", "beeper_chats": ["Ideas"]}
+          "beeper_url": "http://localhost:23373", "beeper_token": "", "beeper_chats": ["Note to self"]}
 ```

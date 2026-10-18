@@ -140,23 +140,28 @@ def from_beeper(st):
     if not token or not chats:
         return
     B, H = CFG.get("beeper_url", "http://localhost:23373"), {"Authorization": f"Bearer {token}"}
-    want = {ideas.norm(c) for c in chats}
-    for chat in requests.get(f"{B}/v1/chats", headers=H, params={"limit": 200}, timeout=20).json().get("items", []):
-        if ideas.norm(chat.get("title") or "") not in want:
-            continue
-        seen = st["beeper_seen"].setdefault(chat["id"], [])
-        msgs = requests.get(f"{B}/v1/chats/{requests.utils.quote(chat['id'], safe='')}/messages", headers=H, timeout=20).json().get("items", [])
-        if not seen:  # first run on this chat: start from now, do not reprocess history
-            st["beeper_seen"][chat["id"]] = [m["id"] for m in msgs]; save_state(st); continue
-        for m in reversed(msgs):  # oldest first
-            if m["id"] in seen:
-                continue
-            seen.append(m["id"]); del seen[:-500]; save_state(st)
-            for u in LINK_RE.findall(m.get("text") or ""):
-                t = handle(u, st)
-                if t:
-                    requests.post(f"{B}/v1/chats/{requests.utils.quote(chat['id'], safe='')}/messages", headers=H, timeout=20,
-                                  json={"text": f"💡 Idea guardada: {t}"})
+    q = lambda cid: requests.utils.quote(cid, safe="")
+    for title in chats:
+        r = requests.get(f"{B}/v1/chats/search", headers=H, params={"query": title, "limit": 10}, timeout=20)
+        if r.status_code == 401:  # OAuth tokens last 30 days: warn once a day, run beeper_auth.py again
+            if st.get("beeper_warned") != dt.date.today().isoformat():
+                ideas.notify("⚠️ Ideas por Beeper", "El token de Beeper Desktop ha caducado: ejecuta beeper_auth.py en insta-ideas.", "links_beeper_token")
+                st["beeper_warned"] = dt.date.today().isoformat(); save_state(st)
+            return
+        for chat in [c for c in r.json().get("items", []) if ideas.norm(c.get("title") or "") == ideas.norm(title)]:
+            seen = st["beeper_seen"].setdefault(chat["id"], [])
+            msgs = requests.get(f"{B}/v1/chats/{q(chat['id'])}/messages", headers=H, timeout=20).json().get("items", [])
+            if not seen:  # first run on this chat: start from now, do not reprocess history
+                st["beeper_seen"][chat["id"]] = [m["id"] for m in msgs] or ["-"]; save_state(st); continue
+            for m in reversed(msgs):  # oldest first
+                if m["id"] in seen:
+                    continue
+                seen.append(m["id"]); del seen[:-500]; save_state(st)
+                for u in LINK_RE.findall(m.get("text") or ""):
+                    t = handle(u, st)
+                    if t:
+                        requests.post(f"{B}/v1/chats/{q(chat['id'])}/messages", headers=H, timeout=20,
+                                      json={"text": f"💡 Idea guardada: {t}"})
 
 
 def main():
