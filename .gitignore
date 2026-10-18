@@ -3,6 +3,7 @@ config.json
 session.json
 state.json
 links_state.json
+vault_sync_state.json
 _cookie.json
 *.log
 # runtime

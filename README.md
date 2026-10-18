@@ -102,3 +102,13 @@ Send any link and it is filed as an idea, with the same analysis, note format an
 "links": {"todo": "todo.ideas_enlaces", "collection": "Enlaces", "interval": 120,
           "beeper_url": "http://localhost:23373", "beeper_token": "", "beeper_chats": ["Note to self"]}
 ```
+
+## Ideas outside Obsidian (`vault_sync.py`)
+
+Run by `links.py` on every cycle (or once with `python vault_sync.py`):
+- **Home Assistant list** (`config.json` → `ideas_todo`, e.g. a Local To-do "Ideas"): one item per idea note, with
+  summary, effort/value and link. Ticking it marks the note `hecha`; deleting it marks it `descartada`; closing the note
+  in Obsidian (status hecha/descartada) ticks the item.
+- **`20-dashboards/Dashboards.md`**: the ideas and projects as plain Markdown tables (ideas to review, quick wins, all,
+  projects), for viewers that do not run Obsidian Bases, such as Home Assistant's notes panel. Rewritten only when it
+  changes.

@@ -12,6 +12,7 @@ Run: python links.py [--once] [--url URL]   (default: keep watching every config
 import datetime as dt, json, os, re, shutil, sys, tempfile, time, traceback
 import ideas  # config, Instagram session, Whisper, Claude/Ollama, note writer and notifications
 from ideas import log, requests
+import vault_sync  # HA «Ideas» list + Markdown dashboards, refreshed every cycle
 
 CFG = ideas.CFG.get("links", {})
 STATE = os.path.join(ideas.HERE, "links_state.json")
@@ -169,7 +170,7 @@ def main():
     if "--url" in sys.argv:
         print(handle(sys.argv[sys.argv.index("--url") + 1], st)); return
     while True:
-        for src in (from_ha, from_beeper):
+        for src in (from_ha, from_beeper, lambda st: vault_sync.run()):
             try:
                 src(st)
             except Exception:
