@@ -144,6 +144,7 @@ def from_beeper(st):
     q = lambda cid: requests.utils.quote(cid, safe="")
     for title in chats:
         r = requests.get(f"{B}/v1/chats/search", headers=H, params={"query": title, "limit": 10}, timeout=20)
+        st["beeper_ok"] = r.status_code != 401
         if r.status_code == 401:  # OAuth tokens last 30 days: warn once a day, run beeper_auth.py again
             if st.get("beeper_warned") != dt.date.today().isoformat():
                 ideas.notify("⚠️ Ideas por Beeper", "El token de Beeper Desktop ha caducado: ejecuta beeper_auth.py en insta-ideas.", "links_beeper_token")
@@ -165,6 +166,17 @@ def from_beeper(st):
                                       json={"text": f"💡 Idea guardada: {t}"})
 
 
+def heartbeat(st):
+    """sensor.ideas_watcher: when the watcher last ran, so Home Assistant can tell if the PC side is alive."""
+    try:
+        ha("POST", "states/sensor.ideas_watcher", json={"state": dt.datetime.now().astimezone().isoformat(timespec="seconds"),
+            "attributes": {"friendly_name": "Ideas: último ciclo", "device_class": "timestamp", "icon": "mdi:robot-happy-outline",
+                           "beeper_token_ok": st.get("beeper_ok"), "links_processed": len(st.get("done", [])),
+                           "interval_s": int(CFG.get("interval", 120))}})
+    except Exception as e:
+        log("[links] heartbeat error:", type(e).__name__)
+
+
 def main():
     st = load_state()
     if "--url" in sys.argv:
@@ -175,6 +187,7 @@ def main():
                 src(st)
             except Exception:
                 log("[links]", src.__name__, "error:", traceback.format_exc().splitlines()[-1])
+        heartbeat(st)
         if "--once" in sys.argv:
             return
         time.sleep(int(CFG.get("interval", 120)))
