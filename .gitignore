@@ -2,10 +2,12 @@
 config.json
 session.json
 state.json
+links_state.json
 _cookie.json
 *.log
 # runtime
 venv/
 browser/
 insta_*/
+link_*/
 __pycache__/

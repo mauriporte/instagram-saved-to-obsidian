@@ -278,7 +278,7 @@ def body_for(mode, d, post_url):
     g = lambda k: (d.get(k) or "").strip()
     head = f"# {d['title']}\n\n> {g('one_liner')}\n\n"
     if mode == "idea":
-        return head + (f"- **Enlace:** {g('url') or '—'}\n- **Reel:** {post_url}\n"
+        return head + (f"- **Enlace:** {g('url') or '—'}\n- **{'Reel' if 'instagram.com' in post_url else 'Fuente'}:** {post_url}\n"
                        f"- **Esfuerzo:** {g('effort') or '?'} · **Valor:** {g('value') or '?'}\n\n"
                        f"## Qué es\n{g('what')}\n\n## Encaje en mi setup\n{g('fit')}\n\n"
                        f"## ¿Aplicable a Claude?\n{g('claude') or '—'}\n\n## ¿En Home Assistant?\n{g('ha') or '—'}\n\n"
@@ -303,7 +303,7 @@ def write_note(mode, collection, d, post_url, brain, when):
     folder = os.path.join(BASE, MODES[mode]["folder"])
     os.makedirs(folder, exist_ok=True)
     name = f"{when:%Y-%m-%d} {slug(d['title'])}.md"
-    tags = ["instagram", mode] + [re.sub(r"\W", "", t.lower()) for t in d.get("tags") or [] if t]
+    tags = ["instagram" if "instagram.com" in post_url else "enlace", mode] + [re.sub(r"\W", "", t.lower()) for t in d.get("tags") or [] if t]
     fm = {"type": mode, "tags": sorted(set(t for t in tags if t)), "created": f"{when:%Y-%m-%d}",
           "updated": f"{when:%Y-%m-%d}", "summary": d.get("one_liner", ""), "collection": collection,
           "url": d.get("url", ""), "source": post_url, "status": "nueva", "brain": brain}
