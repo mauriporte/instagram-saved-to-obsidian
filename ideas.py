@@ -44,7 +44,11 @@ MODES = {
 tools). Figure out exactly WHAT it is and turn it into an implementation idea for their setup. If a repo/tool/skill is
 named, identify it precisely (owner/repo, official URL) — you may use WebSearch/WebFetch to confirm. Be honest: if it is
 hype or does not fit, say so. relevant=false if it is NOT about AI, software, GitHub, tools or tech they could implement.
-Fill: what (2-4 sentences), fit (fit with their setup), steps (concrete), effort, value."""},
+Fill: what (2-4 sentences), fit (fit with their setup), steps (concrete), effort, value,
+claude (could this be applied to or taught to Claude Code — as a skill, MCP server, CLAUDE.md rule, hook or slash
+command? say which and how in 1-3 sentences, or why not), ha (could it be added to their Home Assistant setup —
+integration, automation, dashboard, add-on? how, or why not), pros (list), cons (list: costs, risks, maintenance,
+overlap with what they already have)."""},
     "plan": {"folder": "Planes Instagram", "emoji": "📍", "notify": True,
              "about": "planes, sitios y cosas que hacer",
              "task": """{owner} saved this as a PLAN (a place, restaurant, trip, event, activity, something to do).
@@ -212,14 +216,15 @@ URLs found in the caption: {urls}
 
 Answer in {language} (keep quotes/lyrics in their original language) as a JSON object with exactly these keys
 (use "" or [] for keys that do not apply): relevant (bool), title (max 8 words), one_liner (max 15 words), url,
-what, fit, steps (list), effort (bajo|medio|alto|""), value (bajo|medio|alto|""), where, when, price, quote, artist,
-song, tags (one-word list)."""
+what, fit, steps (list), effort (bajo|medio|alto|""), value (bajo|medio|alto|""), claude, ha, pros (list),
+cons (list), where, when, price, quote, artist, song, tags (one-word list)."""
 
 SCHEMA = {"type": "object",
           "required": ["relevant", "title", "one_liner", "url", "what", "fit", "steps", "effort", "value",
-                       "where", "when", "price", "quote", "artist", "song", "tags"],
-          "properties": {k: {"type": "string"} for k in ("title", "one_liner", "url", "what", "fit", "where", "when",
-                                                         "price", "quote", "artist", "song")}
+                       "claude", "ha", "pros", "cons", "where", "when", "price", "quote", "artist", "song", "tags"],
+          "properties": {k: {"type": "string"} for k in ("title", "one_liner", "url", "what", "fit", "claude", "ha",
+                                                         "where", "when", "price", "quote", "artist", "song")}
+          | {k: {"type": "array", "items": {"type": "string"}} for k in ("pros", "cons")}
           | {"relevant": {"type": "boolean"}, "steps": {"type": "array", "items": {"type": "string"}},
              "tags": {"type": "array", "items": {"type": "string"}},
              "effort": {"type": "string", "enum": ["bajo", "medio", "alto", ""]},
@@ -275,7 +280,10 @@ def body_for(mode, d, post_url):
     if mode == "idea":
         return head + (f"- **Enlace:** {g('url') or '—'}\n- **Reel:** {post_url}\n"
                        f"- **Esfuerzo:** {g('effort') or '?'} · **Valor:** {g('value') or '?'}\n\n"
-                       f"## Qué es\n{g('what')}\n\n## Encaje en mi setup\n{g('fit')}\n\n## Cómo implementarlo\n{lst(d.get('steps'))}\n")
+                       f"## Qué es\n{g('what')}\n\n## Encaje en mi setup\n{g('fit')}\n\n"
+                       f"## ¿Aplicable a Claude?\n{g('claude') or '—'}\n\n## ¿En Home Assistant?\n{g('ha') or '—'}\n\n"
+                       f"## Pros\n{lst(d.get('pros')) or '—'}\n\n## Contras\n{lst(d.get('cons')) or '—'}\n\n"
+                       f"## Cómo implementarlo\n{lst(d.get('steps'))}\n")
     if mode == "plan":
         maps = f"https://www.google.com/maps/search/?api=1&query={urllib.parse.quote(g('where'))}" if g("where") else ""
         return head + (f"- **Dónde:** {g('where') or '—'}" + (f" ([mapa]({maps}))" if maps else "") +
@@ -422,15 +430,19 @@ def main():
         d = process(cl, name, mode, it, done)
         save()
         if d and MODES[mode]["notify"]:
-            results.append((mode, d))
-    if results:
-        lines = []
-        for mode in ("idea", "plan"):
-            for _, d in [r for r in results if r[0] == mode]:
-                lines.append(f"{MODES[mode]['emoji']} **{d['title']}**: {d.get('one_liner', '')}" + (f"\n{d['url']}" if d.get("url") else ""))
-        n_i = sum(1 for m, _ in results if m == "idea"); n_p = len(results) - n_i
-        title = " · ".join(x for x in (f"{n_i} idea(s)" if n_i else "", f"{n_p} plan(es)" if n_p else "") if x)
-        notify(f"Instagram: {title}", "\n\n".join(lines) + "\n\nNotas en Obsidian", f"insta_ideas_{dt.date.today():%Y%m%d}")
+            results.append((mode, d, it["pk"]))
+    for mode, d, pk in results:  # one notification per idea/plan
+        notify_item(mode, d, pk)
+
+
+def notify_item(mode, d, pk):
+    g = lambda k: (d.get(k) or "").strip()
+    parts = [g("one_liner")]
+    if mode == "idea":
+        parts += [f"**Claude:** {g('claude')}" if g("claude") else "", f"**HA:** {g('ha')}" if g("ha") else "",
+                  f"**Esfuerzo:** {g('effort') or '?'} · **Valor:** {g('value') or '?'}"]
+    parts += [g("url"), f"Nota en Obsidian: {MODES[mode]['folder']}"]
+    notify(f"{MODES[mode]['emoji']} {d['title']}", "\n\n".join(p for p in parts if p), f"insta_{mode}_{pk}")
 
 
 if __name__ == "__main__":
