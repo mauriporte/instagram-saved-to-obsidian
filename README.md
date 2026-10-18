@@ -112,3 +112,6 @@ Run by `links.py` on every cycle (or once with `python vault_sync.py`):
 - **`20-dashboards/Dashboards.md`**: the ideas and projects as plain Markdown tables (ideas to review, quick wins, all,
   projects), for viewers that do not run Obsidian Bases, such as Home Assistant's notes panel. Rewritten only when it
   changes.
+- **`sensor.ideas_nuevas`** (pushed to Home Assistant every cycle): the number of open ideas, with each one's title,
+  summary, effort/value and its vault path. A Markdown card can list them as links that open the note in the
+  [Notes Vault](https://github.com/FezVrasta/ha-notes-vault) panel: `[{{ i.title }}](/notes-vault?path={{ i.path | urlencode }})`.

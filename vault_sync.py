@@ -93,6 +93,20 @@ def sync_todo(items_notes, st):
     st["synced"] = sorted(synced)
 
 
+def publish_sensor(items_notes):
+    """sensor.ideas_nuevas: count of ideas not yet hecha/descartada, newest first, each with the path Home Assistant's
+    Notes Vault panel opens (/notes-vault?path=…). Pushed every cycle (REST states do not survive a HA restart)."""
+    if not ideas.HA:
+        return
+    pend = sorted((n for n in items_notes if n.get("status", "nueva") not in DONE), key=lambda n: (n.get("created", ""), n["file"]), reverse=True)
+    rel = os.path.relpath(IDEAS_DIR, ideas.VAULT).replace(os.sep, "/")
+    items = [{"title": n["title"], "summary": n.get("summary", ""), "effort": n.get("effort", ""), "value": n.get("value", ""),
+              "collection": n.get("collection", ""), "path": f"{rel}/{n['file']}"} for n in pend]
+    ha("POST", "states/sensor.ideas_nuevas", json={"state": len(items), "attributes": {
+        "friendly_name": "Ideas nuevas", "icon": "mdi:lightbulb-on", "unit_of_measurement": "ideas",
+        "items": items[:30], "dashboard_path": "20-dashboards/Dashboards.md"}})
+
+
 def cell(s):
     return str(s or "—").replace("|", "/").replace("\n", " ")
 
@@ -157,6 +171,10 @@ def run():
     except Exception as e:
         log("[vault] todo sync error:", type(e).__name__, e)
     ns = notes()  # statuses may have changed
+    try:
+        publish_sensor(ns)
+    except Exception as e:
+        log("[vault] sensor error:", type(e).__name__, e)
     text = render(ns)
     old = open(DASH, encoding="utf-8").read() if os.path.exists(DASH) else ""
     if text != old:
