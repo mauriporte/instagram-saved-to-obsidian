@@ -68,6 +68,7 @@ Then schedule it daily (Windows Task Scheduler, cron, …): `python ideas.py`.
 | `collections` | `[collection name, mode]` pairs in priority order (names match ignoring case/accents). |
 | `modes` | Optional overrides per mode: `folder`, `emoji`, `notify`, `about`. |
 | `backlog_per_run`, `max_new_per_run` | How many older / new items per run. |
+| `order` | `"oldest"` (default) or `"newest"`: which saves go first. `--oldest-first` / `--newest-first` override it for one run. |
 | `home_assistant`, `ollama` | URLs, token variable and fallback model. |
 
 ## Notes

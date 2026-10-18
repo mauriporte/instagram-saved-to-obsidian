@@ -7,7 +7,7 @@
 #   private   -> one neutral line, separate folder; Obsidian only
 # Every run: all NEW saves (since the first run) + up to `backlog_per_run` older items, in collection priority order.
 # Brain: Claude Code headless (your subscription); if it fails (e.g. out of usage) -> local Ollama.
-# Everything personal lives in config.json (see config.example.json). Run: python ideas.py [--backlog N] [--only NAME] [--dry-run]
+# Everything personal lives in config.json (see config.example.json). Run: python ideas.py [--backlog N] [--only NAME] [--newest-first | --oldest-first] [--dry-run]
 import base64, datetime as dt, json, os, re, shutil, subprocess, sys, tempfile, traceback, unicodedata, urllib.parse
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -23,6 +23,9 @@ BACKLOG = int(arg("--backlog", CFG.get("backlog_per_run", 15)))  # older items p
 MAX_NEW = int(CFG.get("max_new_per_run", 25))                    # safety cap for new saves per run
 ONLY = arg("--only", None)
 DRY = "--dry-run" in sys.argv
+ORDER = "newest" if "--newest-first" in sys.argv else "oldest" if "--oldest-first" in sys.argv else CFG.get("order", "oldest")
+assert ORDER in ("oldest", "newest"), f'config "order" must be "oldest" or "newest", not {ORDER!r}'
+NEWEST_FIRST = ORDER == "newest"
 VAULT = CFG["vault"]
 NOTES_DIR = CFG.get("notes_subfolder", "")          # folder inside the vault for the per-mode folders
 BASE = os.path.join(VAULT, NOTES_DIR)
@@ -417,7 +420,7 @@ def main():
         if not c:
             continue
         base = set(c["baseline"] or [])
-        for it in reversed(c["items"]):  # oldest first
+        for it in (c["items"] if NEWEST_FIRST else reversed(c["items"])):  # items are stored newest first
             if it["pk"] in done:
                 continue
             (queue_old if it["pk"] in base else queue_new).append((name, mode, it))
