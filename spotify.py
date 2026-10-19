@@ -88,12 +88,13 @@ def follow_artist(url_or_id):
     if not (aid and tok):
         return None
     H = {"Authorization": "Bearer " + tok}
-    r = requests.get("https://api.spotify.com/v1/me/following/contains", params={"type": "artist", "ids": aid}, headers=H, timeout=20)
+    uri = f"spotify:artist:{aid}"  # Feb 2026: follow/save go through /me/library (the old /me/following answers 403)
+    r = requests.get("https://api.spotify.com/v1/me/library/contains", params={"uris": uri}, headers=H, timeout=20)
     if not r.ok:
         return None
     if r.json() == [True]:
         return "ya"
-    r = requests.put("https://api.spotify.com/v1/me/following", params={"type": "artist", "ids": aid}, headers=H, timeout=20)
+    r = requests.put("https://api.spotify.com/v1/me/library", params={"uris": uri}, headers=H, timeout=20)
     return "nuevo" if r.status_code in (200, 204) else None
 
 
@@ -107,7 +108,7 @@ def save_track(url):
     tid, tok = track_id(url), access_token()
     if not (tid and tok):
         return False
-    r = requests.put("https://api.spotify.com/v1/me/tracks", params={"ids": tid},
+    r = requests.put("https://api.spotify.com/v1/me/library", params={"uris": f"spotify:track:{tid}"},
                      headers={"Authorization": "Bearer " + tok}, timeout=20)
     return r.status_code in (200, 201, 204)
 
