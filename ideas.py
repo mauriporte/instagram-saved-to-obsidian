@@ -23,6 +23,17 @@ BACKLOG = int(arg("--backlog", CFG.get("backlog_per_run", 15)))  # older items p
 MAX_NEW = int(CFG.get("max_new_per_run", 25))                    # safety cap for new saves per run
 LIMIT = int(arg("--limit", 0)) or None                           # --limit N: at most N posts this run (tests)
 ONLY = arg("--only", None)
+
+
+def in_run(name):
+    """This run handles the collection: the one chosen (--only / HA selector), or with «Todas» the ones switched on in
+    HA («Pendientes por colección», config "todas"; every collection when that list is missing)."""
+    if ONLY:
+        return norm(ONLY) == norm(name)
+    todas = CFG.get("todas")
+    return todas is None or any(norm(t) == norm(name) for t in todas)
+
+
 DRY = "--dry-run" in sys.argv
 MAX_TRIES = 3  # a post whose download/analysis fails this many times is set aside (state.json "failed")
 CONTINUOUS = "--continuous" in sys.argv  # started by links.py's continuous switch: reuse a recent Instagram sync
@@ -369,7 +380,7 @@ def sync(cl, state):
         week = state.get("full_sync", "") < (dt.date.today() - dt.timedelta(days=7)).isoformat()
         for name, mode in COLLECTIONS:
             pk = by_name.get(norm(name))
-            if not pk or (ONLY and norm(ONLY) != norm(name)):
+            if not pk or not in_run(name):
                 continue
             c = state["collections"].setdefault(name, {"items": [], "baseline": None})
             known = {i["pk"] for i in c["items"]}
@@ -812,7 +823,7 @@ def scan():
     queue_new, queue_old = [], []
     for name, mode in COLLECTIONS:
         c = state["collections"].get(name)
-        if not c or (ONLY and norm(ONLY) != norm(name)):  # --only NAME: sync and process just that collection
+        if not c or not in_run(name):  # --only NAME: sync and process just that collection
             continue
         base = set(c["baseline"] or [])
         for it in (c["items"] if newest_first else reversed(c["items"])):  # items are stored newest first

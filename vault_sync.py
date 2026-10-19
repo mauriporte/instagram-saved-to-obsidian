@@ -234,20 +234,6 @@ def publish_pending():
         left = [i for i in items if i["pk"] not in done]
         aside = sum(failed.get(i["pk"], 0) >= ideas.MAX_TRIES for i in left)
         rows.append({"c": name, "p": len(left) - aside, "f": aside, "t": sum(i["pk"] not in unsaved for i in items)})  # still saved on Instagram
-    ha("POST", "states/sensor.insta_ideas_pendientes", json={"state": sum(r["p"] for r in rows), "attributes": {
-        "friendly_name": "Ideas: pendientes", "icon": "mdi:progress-clock",
-        "last_sync": st.get("last_sync"), "rows": rows}})
-    ent = ideas.CFG.get("collection_entity")  # the scan's «Colección» selector shows the posts left: "Work · 49"
-    sel = ha("GET", f"states/{ent}") if ent else None
-    if sel is not None and sel.ok:
-        opts = sel.json()["attributes"]["options"]
-        base = lambda o: re.sub(r" · \d+$", "", o)
-        new = [f"Todas · {sum(r['p'] for r in rows)}"] + [f"{r['c']} · {r['p']}" for r in sorted(rows, key=lambda r: ideas.norm(r["c"]))]  # 1st option = all collections (the scan only checks its position)
-        if opts != new:
-            current = base(sel.json()["state"])
-            ha("POST", "services/input_select/set_options", json={"entity_id": ent, "options": new})
-            keep = next((o for o in new if base(o) == current), new[0])
-            ha("POST", "services/input_select/select_option", json={"entity_id": ent, "option": keep})
     ig = st.get("ig_collections") or {}  # every Instagram collection with its saved count, from the last sync
     for r in rows:  # one sensor per collection, for the clickable list (a row selects that collection in the viewer)
         total = ig.get(next((n for n in ig if ideas.norm(n) == ideas.norm(r["c"])), ""), r["t"])
@@ -267,7 +253,27 @@ def publish_pending():
         r = by.get(ideas.norm(n))
         total = ig.get(n, r["t"] if r else 0)
         labels[n] = f"{n} · {r['p']} de {total}" if r else f"{n} · {ig.get(n, 0)} guardados"
-    sync_switches(names, labels, set(by))
+    sync_switches(names, labels, set(by))  # first: a flipped switch updates the «Todas» list
+    publish_totals(st, rows)
+
+
+def publish_totals(st, rows):
+    """The Pendientes total and the scan's «Colección» dropdown: only collections switched on («Todas» list)."""
+    on = [r for r in rows if in_todas(r["c"])]
+    ha("POST", "states/sensor.insta_ideas_pendientes", json={"state": sum(r["p"] for r in on), "attributes": {
+        "friendly_name": "Ideas: pendientes", "icon": "mdi:progress-clock",
+        "last_sync": st.get("last_sync"), "rows": rows}})
+    ent = ideas.CFG.get("collection_entity")  # options carry the posts left: "Work · 49"
+    sel = ha("GET", f"states/{ent}") if ent else None
+    if sel is not None and sel.ok:
+        opts = sel.json()["attributes"]["options"]
+        base = lambda o: re.sub(r" · \d+$", "", o)
+        new = [f"Todas · {sum(r['p'] for r in on)}"] + [f"{r['c']} · {r['p']}" for r in sorted(on, key=lambda r: ideas.norm(r["c"]))]
+        if opts != new:
+            current = base(sel.json()["state"])
+            ha("POST", "services/input_select/set_options", json={"entity_id": ent, "options": new})
+            keep = next((o for o in new if base(o) == current), new[0])
+            ha("POST", "services/input_select/select_option", json={"entity_id": ent, "option": keep})
 
 
 PENDING_CARD = "Pendientes por colección"
@@ -291,24 +297,24 @@ def ws_session():
 
 
 def set_processing(name, on):
-    """Turn processing of an Instagram collection on/off in config.json; its type is remembered while it is off
-    (a collection that never had one gets "general"). Scans read the config fresh; this process updates in place."""
+    """A «Pendientes por colección» switch: whether the collection is included in «Todas» runs (config "todas").
+    Every collection stays configured (so it's in the dropdowns); one chosen alone in «Colección» is always processed."""
     p = os.path.join(ideas.HERE, "config.json")
     c = json.load(open(p, encoding="utf-8"))
-    modes = c.setdefault("collection_modes", {})
-    cols = c["collections"]
-    current = next((x for x in cols if ideas.norm(x[0]) == ideas.norm(name)), None)
-    if on and not current:
-        cols.append([name, modes.get(name, "general")])
-    elif not on and current:
-        modes[current[0]] = current[1]; cols.remove(current)
-    else:
+    todas = c.get("todas") or [n for n, _ in c["collections"]]
+    has = any(ideas.norm(t) == ideas.norm(name) for t in todas)
+    if on == has:
         return
+    todas = todas + [name] if on else [t for t in todas if ideas.norm(t) != ideas.norm(name)]
+    c["todas"] = todas
     json.dump(c, open(p, "w", encoding="utf-8"), ensure_ascii=False, indent=2)
-    ideas.COLLECTIONS[:] = [tuple(x) for x in cols]
-    log(f"[vault] processing {'ON' if on else 'OFF'}: {name}")
-    kind = modes.get(name, "general") if on else current[1]
-    ideas.notify("📂 Colecciones", f"«{name}» {'se procesará' if on else 'ya no se procesa'} (tipo {kind}).", "insta_proc_toggle")
+    ideas.CFG["todas"] = todas
+    log(f"[vault] Todas {'+' if on else '-'} {name}")
+
+
+def in_todas(name):
+    todas = ideas.CFG.get("todas")
+    return todas is None or any(ideas.norm(t) == ideas.norm(name) for t in todas)
 
 
 def sync_switches(names, labels, processed):
@@ -321,7 +327,7 @@ def sync_switches(names, labels, processed):
         helpers = {h["id"]: h for h in call({"type": "input_boolean/list"})["result"]}
         for n in names:
             hid = ent(n).split(".", 1)[1]
-            want = ideas.norm(n) in processed
+            want = ideas.norm(n) in processed and in_todas(n)
             if hid not in helpers:  # created with the id as its name (HA derives the id from the name), then renamed
                 call({"type": "input_boolean/create", "name": hid, "icon": "mdi:folder-sync-outline", "initial": want})
                 call({"type": "input_boolean/update", "input_boolean_id": hid, "name": labels[n], "icon": "mdi:folder-sync-outline",
