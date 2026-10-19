@@ -8,7 +8,8 @@ the vault dashboards (Bases only render inside Obsidian; Home Assistant's notes 
   rewritten only when something changed (no Syncthing churn).
 Called from links.py on every cycle; `python vault_sync.py` runs it once.
 """
-import json, os, re
+
+import json, os, re, urllib.parse
 import ideas
 from ideas import log, requests
 
@@ -161,11 +162,11 @@ def publish_sensor(st):
         "items": items[:30], "dashboard_path": "20-dashboards/Dashboards.md"}})
     ha("POST", "states/sensor.ideas_total", json={"state": len(every), "attributes": {
         "friendly_name": "Ideas procesadas", "icon": "mdi:lightbulb-group", "unit_of_measurement": "ideas"}})
-    done = sorted((n for n in every if n.get("status") == "hecha"), key=lambda n: (n.get("updated", ""), n["file"]), reverse=True)
+    done = sorted((n for n in every if n.get("status") == "hecha"), key=lambda n: (n.get("updated", ""), n["file"]))  # oldest first
     ha("POST", "states/sensor.ideas_completadas", json={"state": len(done), "attributes": {
         "friendly_name": "Completadas", "icon": "mdi:check-circle", "unit_of_measurement": "ideas",
         "items": [{"t": n["title"], "c": n.get("collection", ""), "d": n.get("updated", ""), "s": (n.get("summary") or "")[:110],
-                   "p": rel(n)} for n in done]}})  # newest completion first, for the «Completadas» page
+                   "p": rel(n)} for n in done]}})  # oldest completion first, for the «Completadas» page
 
 
 VIEW_SELECT = ideas.CFG.get("collection_view_entity", "input_select.ideas_ver_coleccion")
@@ -258,14 +259,47 @@ def check_move(st, save):
         publish_collections()
     dbtn = get(DELETE_BTN)
     if dbtn.ok and pressed_since(dbtn, "delete_seen", st, save) and n:
-        trash = os.path.join(ideas.VAULT, ".trash")  # Obsidian's own trash: the note can be restored from there
-        os.makedirs(trash, exist_ok=True)
-        dest, i = os.path.join(trash, n["file"]), 2
-        while os.path.exists(dest):
-            dest = os.path.join(trash, f"{n['file'][:-3]} ({i}).md"); i += 1
-        os.replace(n["path"], dest)
-        log(f"[vault] deleted {n['file']} ({viewed}) -> .trash")
-        ideas.notify("🗑️ Idea eliminada", f"«{n['title']}» ({viewed}) está en la papelera de Obsidian (.trash).", "ideas_eliminada")
+        trash_note(n)
+        publish_collections()
+    note_mover(st, save)
+
+
+def trash_note(n):
+    trash = os.path.join(ideas.VAULT, ".trash")  # Obsidian's own trash: the note can be restored from there
+    os.makedirs(trash, exist_ok=True)
+    dest, i = os.path.join(trash, n["file"]), 2
+    while os.path.exists(dest):
+        dest = os.path.join(trash, f"{n['file'][:-3]} ({i}).md"); i += 1
+    os.replace(n["path"], dest)
+    log(f"[vault] deleted {n['file']} ({n['collection']}) -> .trash")
+    ideas.notify("🗑️ Idea eliminada", f"«{n['title']}» ({n['collection']}) está en la papelera de Obsidian (.trash).", "ideas_eliminada")
+
+
+MOVE_NOTE = ideas.CFG.get("move_note_entity", "input_text.ideas_mover_nota")
+
+
+def note_mover(st, save):
+    """«Mover» in a note's bottom bar in Notes (patch 09) writes "<ms>|<collection>|<note path>" to MOVE_NOTE: move it."""
+    r = ha("GET", f"states/{MOVE_NOTE}")
+    if not r.ok:
+        return
+    val = r.json()["state"]
+    if val == st.get("move_note_seen"):
+        return
+    first = "move_note_seen" not in st
+    st["move_note_seen"] = val; save(st)
+    parts = val.split("|", 2)
+    if first or len(parts) != 3:
+        return
+    target, path = parts[1], parts[2]
+    names = {c for c, _ in ideas.COLLECTIONS}
+    n = next((x for x in all_notes() if os.path.relpath(x["path"], ideas.VAULT).replace(os.sep, "/") == path), None)
+    if n and target in names and target != n["collection"]:
+        old = n["collection"]
+        set_field(n["path"], "collection", target)
+        n["collection"] = target
+        relocate([n])
+        ideas.notify("📂 Idea movida", f"«{n['title']}»: {old} → {target}", "ideas_movida")
         publish_collections()
 
 

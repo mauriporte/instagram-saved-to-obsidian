@@ -539,10 +539,11 @@ def lst(items):
 
 def body_for(mode, d, post_url, pics=()):
     g = lambda k: (d.get(k) or "").strip()
+    post = f"[{'Abrir en Instagram' if 'instagram.com' in post_url else post_url}]({post_url})"  # clickable in Notes
     warn = f"> [!warning] Idea incompleta: {d['incomplete']}\n\n" if d.get("incomplete") else ""
-    head = f"# {d['title']}\n\n- [ ] Completada\n\n{warn}> {g('one_liner')}\n\n"  # ticking it marks the idea complete (vault_sync) + "".join(f"![[{p}|500]]\n" for p in pics) + ("\n" if pics else "")
+    head = f"# {d['title']}\n\n- [ ] Completada\n\n{warn}> {g('one_liner')}\n\n" + "".join(f"![[{p}|500]]\n" for p in pics) + ("\n" if pics else "")  # ticking the box marks the idea complete (vault_sync)
     if mode == "idea":
-        return head + (f"- **Enlace:** {g('url') or '—'}\n- **{'Reel' if 'instagram.com' in post_url else 'Fuente'}:** {post_url}\n"
+        return head + (f"- **Enlace:** {g('url') or '—'}\n- **{'Reel' if 'instagram.com' in post_url else 'Fuente'}:** {post}\n"
                        f"- **Esfuerzo:** {g('effort') or '?'} · **Valor:** {g('value') or '?'}\n\n"
                        f"## Qué es\n{g('what')}\n\n## Encaje en mi setup\n{g('fit')}\n\n"
                        f"## ¿Aplicable a Claude?\n{g('claude') or '—'}\n\n## ¿En Home Assistant?\n{g('ha') or '—'}\n\n"
@@ -555,11 +556,11 @@ def body_for(mode, d, post_url, pics=()):
         reviews = "\n".join(f"- {r}" for r in d.get("reviews") or [] if r) or "_No se encontraron reseñas de fuentes fiables._"
         return head + (f"- **Dónde:** {g('where') or '—'}" + (f" · [Google Maps]({maps})" if maps else "") +
                        f"\n- **Cuándo / horario:** {g('when') or '—'}\n- **Precio:** {g('price') or '—'}\n"
-                       f"- **Valoración:** {g('rating') or '—'}\n- **Web:** {g('url') or '—'}\n- **Post:** {post_url}\n\n"
+                       f"- **Valoración:** {g('rating') or '—'}\n- **Web:** {g('url') or '—'}\n- **Post:** {post}\n\n"
                        f"## Qué es\n{g('what')}\n\n## Reseñas\n{reviews}\n\n## Consejos\n{lst(d.get('steps'))}\n")
     if mode == "personal":
         quote = "\n".join("> " + l if l.strip() else ">" for l in g("quote").splitlines()) if g("quote") else ""
-        return head + (f"## Texto\n{quote}\n\n" if quote else "") + f"## Mensaje\n{g('what')}\n\n## Por qué resuena\n{g('fit')}\n\n- **Post:** {post_url}\n"
+        return head + (f"## Texto\n{quote}\n\n" if quote else "") + f"## Mensaje\n{g('what')}\n\n## Por qué resuena\n{g('fit')}\n\n- **Post:** {post}\n"
     if mode == "music":
         q = urllib.parse.quote(f"{g('artist')} {g('song')}".strip())
         artist = f"[{g('artist') or '?'}]({g('artist_url')})" if g("artist_url").startswith("https://") else (g("artist") or "?")
@@ -573,14 +574,14 @@ def body_for(mode, d, post_url, pics=()):
         artist += f" · Spotify: {follow}" if follow else ""
         artist += " · canción añadida a tu biblioteca" if d.get("liked") else ""
         return head + (f"- **Artista:** {artist}\n- **Canción:** {g('song') or '?'}\n"
-                       f"- **Escuchar:** {g('url') or f'https://open.spotify.com/search/{q}'}\n- **Post:** {post_url}\n\n{g('what')}\n"
+                       f"- **Escuchar:** {g('url') or f'https://open.spotify.com/search/{q}'}\n- **Post:** {post}\n\n{g('what')}\n"
                        f"{event}\n## Próximos conciertos en Europa\n{tour}\n")
     if mode == "food":
         ing = "\n".join(f"- {x}" for x in d.get("ingredients") or [] if x) or "—"
         var = "\n".join(f"- {x}" for x in d.get("variants") or [] if x) or "_No se conocen otras versiones destacadas._"
         return head + (f"{g('what')}\n\n## Ingredientes\n{ing}\n\n## Preparación\n{lst(d.get('steps')) or '—'}\n\n"
                        f"## Otras versiones\n{var}\n\n" + (f"- **Receta de referencia:** {g('url')}\n" if g("url") else "")
-                       + f"- **Post:** {post_url}\n")
+                       + f"- **Post:** {post}\n")
     if mode == "learn":
         fmt = {"online": "Online (virtual)", "presencial": "Presencial", "mixto": "Mixto (online y presencial)"}.get(g("format"), g("format") or "?")
         maps = g("maps") if g("maps").startswith("https://") else ""
@@ -588,17 +589,17 @@ def body_for(mode, d, post_url, pics=()):
                 f"- **Inscripción:** {g('signup')}" * bool(g("signup")), f"- **Precio:** {g('price')}" * bool(g("price")),
                 f"- **Cuándo:** {g('when')}" * bool(g("when")),
                 (f"- **Dónde:** {g('where')}" + (f" · [Google Maps]({maps})" if maps else "")) * bool(g("where")),
-                f"- **Post:** {post_url}"]
+                f"- **Post:** {post}"]
         return head + "\n".join(r for r in rows if r) + f"\n\n## Qué es\n{g('what')}\n\n## Qué aprenderías\n{lst(d.get('steps')) or '—'}\n"
     if mode == "general":
         text = "\n".join("> " + l if l.strip() else ">" for l in g("quote").splitlines()) if g("quote") else ""
         return head + (f"{g('what')}\n\n## Puntos clave\n{lst(d.get('steps')) or '—'}\n\n" + (f"## Texto\n{text}\n\n" if text else "")
-                       + (f"- **Enlace:** {g('url')}\n" if g("url") else "") + f"- **Post:** {post_url}\n")
+                       + (f"- **Enlace:** {g('url')}\n" if g("url") else "") + f"- **Post:** {post}\n")
     if mode == "home":
         text = "\n".join("> " + l if l.strip() else ">" for l in g("quote").splitlines()) if g("quote") else ""
         return head + (f"{g('what')}\n\n## Cómo\n{lst(d.get('steps')) or '—'}\n\n" + (f"## Texto\n{text}\n\n" if text else "") +
-                       (f"- **Coste:** {g('price')}\n" if g("price") else "") + f"- **Post:** {post_url}\n")
-    return head + f"- **Post:** {post_url}\n"  # private
+                       (f"- **Coste:** {g('price')}\n" if g("price") else "") + f"- **Post:** {post}\n")
+    return head + f"- **Post:** {post}\n"  # private
 
 
 MONTHS = ("ene|feb|mar|abr|may|jun|jul|ago|sep|oct|nov|dic|jan|apr|aug|dec|january|february|march|april|june|july|"
