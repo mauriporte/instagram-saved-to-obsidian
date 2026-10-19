@@ -227,13 +227,13 @@ def publish_pending():
     if not ideas.HA or not os.path.exists(ideas.STATE):
         return
     st = json.load(open(ideas.STATE, encoding="utf-8"))
-    done, failed = set(st.get("done", [])), st.get("failed", {})
+    done, failed, unsaved = set(st.get("done", [])), st.get("failed", {}), set(st.get("unsaved", []))
     rows = []
     for name, _ in ideas.COLLECTIONS:
         items = (st.get("collections", {}).get(name) or {}).get("items") or []
         left = [i for i in items if i["pk"] not in done]
         aside = sum(failed.get(i["pk"], 0) >= ideas.MAX_TRIES for i in left)
-        rows.append({"c": name, "p": len(left) - aside, "f": aside, "t": len(items)})
+        rows.append({"c": name, "p": len(left) - aside, "f": aside, "t": sum(i["pk"] not in unsaved for i in items)})  # still saved on Instagram
     ha("POST", "states/sensor.insta_ideas_pendientes", json={"state": sum(r["p"] for r in rows), "attributes": {
         "friendly_name": "Ideas: pendientes", "icon": "mdi:progress-clock",
         "last_sync": st.get("last_sync"), "rows": rows}})
