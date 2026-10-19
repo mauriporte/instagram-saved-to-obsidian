@@ -221,6 +221,10 @@ def publish_pending():
     ha("POST", "states/sensor.insta_ideas_pendientes", json={"state": sum(r["p"] for r in rows), "attributes": {
         "friendly_name": "Ideas: pendientes", "icon": "mdi:progress-clock", "unit_of_measurement": "posts",
         "last_sync": st.get("last_sync"), "rows": rows}})
+    for r in rows:  # one sensor per collection, for the clickable list (a row selects that collection in the viewer)
+        ha("POST", f"states/sensor.insta_ideas_pendientes_{col_slug(r['c'])}", json={"state": r["p"], "attributes": {
+            "friendly_name": r["c"], "icon": "mdi:folder-clock-outline", "unit_of_measurement": f"de {r['t']}",
+            "collection": r["c"], "set_aside": r["f"]}})
 
 
 def publish_collections():
@@ -236,9 +240,10 @@ def publish_collections():
             "t": n["title"], "s": (n.get("summary") or "")[:110], "d": n.get("created", ""),
             "st": n.get("status", ""), "p": f"{rel}/{n['file']}"})
     order = [n for n, _ in ideas.COLLECTIONS] + sorted(set(groups) - {n for n, _ in ideas.COLLECTIONS})
-    names = [n for n in order if n in groups]
+    configured = {n for n, _ in ideas.COLLECTIONS}
+    names = [n for n in order if n in groups or n in configured]  # every collection, even with no notes yet
     for name in names:
-        items = sorted(groups[name], key=lambda x: (x["d"], x["p"]), reverse=True)
+        items = sorted(groups.get(name, []), key=lambda x: (x["d"], x["p"]), reverse=True)
         ha("POST", f"states/sensor.ideas_coleccion_{col_slug(name)}", json={"state": len(items), "attributes": {
             "friendly_name": f"Ideas: {name}", "icon": "mdi:folder-multiple-image", "unit_of_measurement": "notas",
             "collection": name, "items": items}})
