@@ -58,6 +58,9 @@ def ha(method, path, **kw):
     return requests.request(method, f"{ideas.HA}/api/{path}", headers={"Authorization": "Bearer " + ideas.ha_token()}, timeout=30, **kw)
 
 
+CLEAR_BTN = ideas.CFG.get("ideas_clear_button", "input_button.vaciar_lista_ideas")
+
+
 def sync_todo(items_notes, st):
     if not ideas.HA:
         return
@@ -65,6 +68,17 @@ def sync_todo(items_notes, st):
     if not r.ok:
         log("[vault] todo list unavailable:", r.status_code); return
     items = (r.json().get("service_response") or {}).get(TODO, {}).get("items", [])
+    cleared = set(st.get("cleared", []))  # removed with «Vaciar lista»: the notes keep their status, they don't come back
+    btn = ha("GET", f"states/{CLEAR_BTN}")
+    if btn.ok and pressed_since(btn, "clear_seen", st, lambda s: None) and items:
+        for it in items:
+            m = re.search(r"nota: (.+\.md)\s*$", it.get("description") or "")
+            if m:
+                cleared.add(m.group(1))
+        ha("POST", "services/todo/remove_item", json={"entity_id": TODO, "item": [it["uid"] for it in items]})
+        log(f"[vault] Ideas list emptied: {len(items)} items (notes unchanged)")
+        items = []
+    st["cleared"] = sorted(cleared)
     by_note = {}
     for it in items:
         m = re.search(r"nota: (.+\.md)\s*$", it.get("description") or "")
@@ -74,6 +88,8 @@ def sync_todo(items_notes, st):
     for n in items_notes:
         it, status = by_note.get(n["file"]), n.get("status", "nueva")
         if it is None:
+            if n["file"] in cleared:
+                continue
             if n["file"] in synced:  # deleted in HA → discarded
                 if status not in DONE:
                     set_status(n["path"], "descartada")
