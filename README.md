@@ -65,12 +65,14 @@ Then schedule it daily (Windows Task Scheduler, cron, …): `python ideas.py`.
 | `owner`, `language` | Who saved the posts and the language of the notes. |
 | `profile` | A few lines about you and your setup, so ideas are judged for fit. |
 | `vault`, `notes_subfolder`, `home_note` | Where the notes go; `home_note` (optional) gets a link to each index. |
+| `assets_subfolder`, `picture_modes` | Where saved pictures go (default `90-assets/instagram`) and which modes show them (default plan, personal, music; videos give one frame, carousels up to 4). |
 | `collections` | `[collection name, mode]` pairs in priority order (names match ignoring case/accents). |
 | `modes` | Optional overrides per mode: `folder`, `emoji`, `notify`, `about`. |
 | `backlog_per_run`, `max_new_per_run` | How many older / new items per run. |
 | `order` | `"oldest"` (default) or `"newest"`: which saves go first. `--oldest-first` / `--newest-first` override it for one run. |
 | `scan_button` | Optional Home Assistant `input_button`: pressing it makes `links.py` start a scan (if none is running). Progress is published as `sensor.insta_ideas_escaneo`. |
 | `continuous_switch` | Optional Home Assistant `input_boolean`: while on, `links.py` starts a new scan as soon as the last one ends (reusing an Instagram sync less than 6 h old); it turns itself off when a scan completes nothing. |
+| `collection_entity` | Optional Home Assistant `input_select`: 1st option = all collections (in priority order), the others = one collection name each; scans then sync and process only that collection. `--only NAME` overrides it. |
 | `order_entity` | Optional Home Assistant `input_select` that overrides `order`: its 1st option means oldest first, its 2nd newest first. |
 | `home_assistant`, `ollama` | URLs, token variable and fallback model. |
 

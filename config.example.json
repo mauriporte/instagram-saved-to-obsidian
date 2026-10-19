@@ -4,6 +4,8 @@
   "vault": "C:\\Users\\you\\ObsidianVault",
   "notes_subfolder": "Instagram",
   "home_note": null,
+  "assets_subfolder": "90-assets/instagram",
+  "picture_modes": ["plan", "personal", "music"],
   "home_assistant": {
     "url": "http://homeassistant.local:8123",
     "token_env": "HA_TOKEN"
@@ -17,6 +19,7 @@
   "order": "oldest",
   "order_entity": null,
   "scan_button": null,
+  "collection_entity": null,
   "continuous_switch": null,
   "profile": "About Alex: software developer. Homelab: Home Assistant on a mini-PC, a NAS with Jellyfin, a Windows PC with a GPU running Ollama. Prefers self-hosted, free tools.",
   "collections": [

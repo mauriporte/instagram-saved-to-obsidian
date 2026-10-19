@@ -29,6 +29,8 @@ VAULT = CFG["vault"]
 NOTES_DIR = CFG.get("notes_subfolder", "")          # folder inside the vault for the per-mode folders
 BASE = os.path.join(VAULT, NOTES_DIR)
 HOME_NOTE = CFG.get("home_note")                    # optional: note that gets a link to each index (e.g. "Home.md")
+ASSETS = os.path.join(VAULT, CFG.get("assets_subfolder", "90-assets/instagram"))  # saved pictures shown in the notes
+PICTURE_MODES = set(CFG.get("picture_modes", ["plan", "personal", "music"]))      # which modes get the picture
 HA = CFG.get("home_assistant", {}).get("url")       # optional
 HA_TOKEN_ENV = CFG.get("home_assistant", {}).get("token_env", "HA_TOKEN")
 OLLAMA = CFG.get("ollama", {}).get("url", "http://localhost:11434")
@@ -54,13 +56,19 @@ overlap with what they already have)."""},
     "plan": {"folder": "Planes Instagram", "emoji": "📍", "notify": True,
              "about": "planes, sitios y cosas que hacer",
              "task": """{owner} saved this as a PLAN (a place, restaurant, trip, event, activity, something to do).
-Extract it precisely: what it is, where (venue + address/city), when (dates/hours if any), price, and practical tips.
-Use WebSearch if needed to find the exact place/event and its official URL. Fill: what, where, when, price,
-steps (practical tips as a list)."""},
+Identify the exact place/event with WebSearch/WebFetch (venue name, full address, official URL). Fill: what, where
+(venue name + full address), when (dates or opening hours), price (price range or ticket price), url (official site),
+maps (a Google Maps link for that exact place: https://www.google.com/maps/search/?api=1&query=<venue name and address,
+URL-encoded>), rating (e.g. "Google 4.6 (2,300 reseñas)" if you can confirm it, else ""), reviews (2-4 items, each
+"Source — rating if any — one-sentence summary — URL", ONLY from reputable sources you actually found: Google Maps,
+TripAdvisor, Michelin Guide, Guía Repsol, well-known newspapers/magazines; never invent reviews; [] if none found),
+steps (practical tips as a list: booking, best time, what to order/see)."""},
     "personal": {"folder": "Personal Instagram", "emoji": "🪞", "notify": False,
                  "about": "reflexiones, frases y cosas personales",
                  "task": """{owner} saved this for personal reasons: a quote, a reflection, something deep or meaningful
-to them. Capture it faithfully: quote = the exact key sentence(s) if there is text/speech (original language),
+to them: a saying, phrase, poem or reflection. TRANSCRIBE it completely and faithfully: quote = the whole text exactly as
+it appears on the image(s)/frames or is spoken (every line of a poem, line breaks kept, original language, no
+paraphrasing; open the images with the Read tool to read them), plus the author after a final line "— Author" if shown.
 what = the core message in 1-3 sentences, fit = in one or two sentences why it may resonate (gentle, no therapy talk)."""},
     "music": {"folder": "Música Instagram", "emoji": "🎵", "notify": False,
               "about": "canciones y artistas guardados",
@@ -103,6 +111,22 @@ def ha_token():
         t = subprocess.run(["powershell", "-NoProfile", "-c", f'[Environment]::GetEnvironmentVariable("{HA_TOKEN_ENV}","User")'],
                            capture_output=True, text=True).stdout.strip()
     return t
+
+
+def run_collection():
+    """--only NAME > Home Assistant selector ("collection_entity": 1st option = all collections, then one per name) > all."""
+    if ONLY:
+        return ONLY
+    ent = CFG.get("collection_entity")
+    if HA and ent:
+        try:
+            s = requests.get(f"{HA}/api/states/{ent}", headers={"Authorization": "Bearer " + ha_token()}, timeout=20).json()
+            opts = s["attributes"]["options"]
+            if s["state"] in opts[1:] and any(norm(s["state"]) == norm(n) for n, _ in COLLECTIONS):
+                return s["state"]
+        except Exception as e:
+            log(f"collection: {ent} unreadable ({type(e).__name__}), using all")
+    return None
 
 
 def run_order():
@@ -278,14 +302,15 @@ URLs found in the caption: {urls}
 Answer in {language} (keep quotes/lyrics in their original language) as a JSON object with exactly these keys
 (use "" or [] for keys that do not apply): relevant (bool), title (max 8 words), one_liner (max 15 words), url,
 what, fit, steps (list), effort (bajo|medio|alto|""), value (bajo|medio|alto|""), claude, ha, pros (list),
-cons (list), where, when, price, quote, artist, song, tags (one-word list)."""
+cons (list), where, when, price, maps, rating, reviews (list), quote, artist, song, tags (one-word list)."""
 
 SCHEMA = {"type": "object",
           "required": ["relevant", "title", "one_liner", "url", "what", "fit", "steps", "effort", "value",
-                       "claude", "ha", "pros", "cons", "where", "when", "price", "quote", "artist", "song", "tags"],
+                       "claude", "ha", "pros", "cons", "where", "when", "price", "maps", "rating", "reviews",
+                       "quote", "artist", "song", "tags"],
           "properties": {k: {"type": "string"} for k in ("title", "one_liner", "url", "what", "fit", "claude", "ha",
-                                                         "where", "when", "price", "quote", "artist", "song")}
-          | {k: {"type": "array", "items": {"type": "string"}} for k in ("pros", "cons")}
+                                                         "where", "when", "price", "maps", "rating", "quote", "artist", "song")}
+          | {k: {"type": "array", "items": {"type": "string"}} for k in ("pros", "cons", "reviews")}
           | {"relevant": {"type": "boolean"}, "steps": {"type": "array", "items": {"type": "string"}},
              "tags": {"type": "array", "items": {"type": "string"}},
              "effort": {"type": "string", "enum": ["bajo", "medio", "alto", ""]},
@@ -335,9 +360,9 @@ def lst(items):
     return "\n".join(f"{i}. {s}" for i, s in enumerate(clean, 1)) or "—"
 
 
-def body_for(mode, d, post_url):
+def body_for(mode, d, post_url, pics=()):
     g = lambda k: (d.get(k) or "").strip()
-    head = f"# {d['title']}\n\n> {g('one_liner')}\n\n"
+    head = f"# {d['title']}\n\n> {g('one_liner')}\n\n" + "".join(f"![[{p}|500]]\n" for p in pics) + ("\n" if pics else "")
     if mode == "idea":
         return head + (f"- **Enlace:** {g('url') or '—'}\n- **{'Reel' if 'instagram.com' in post_url else 'Fuente'}:** {post_url}\n"
                        f"- **Esfuerzo:** {g('effort') or '?'} · **Valor:** {g('value') or '?'}\n\n"
@@ -346,13 +371,17 @@ def body_for(mode, d, post_url):
                        f"## Pros\n{lst(d.get('pros')) or '—'}\n\n## Contras\n{lst(d.get('cons')) or '—'}\n\n"
                        f"## Cómo implementarlo\n{lst(d.get('steps'))}\n")
     if mode == "plan":
-        maps = f"https://www.google.com/maps/search/?api=1&query={urllib.parse.quote(g('where'))}" if g("where") else ""
-        return head + (f"- **Dónde:** {g('where') or '—'}" + (f" ([mapa]({maps}))" if maps else "") +
-                       f"\n- **Cuándo:** {g('when') or '—'}\n- **Precio:** {g('price') or '—'}\n"
-                       f"- **Enlace:** {g('url') or '—'}\n- **Post:** {post_url}\n\n## Qué es\n{g('what')}\n\n## Consejos\n{lst(d.get('steps'))}\n")
+        place = " ".join(x for x in (d.get("title", ""), g("where")) if x)
+        maps = g("maps") if g("maps").startswith("https://") else (
+            f"https://www.google.com/maps/search/?api=1&query={urllib.parse.quote(place)}" if g("where") else "")
+        reviews = "\n".join(f"- {r}" for r in d.get("reviews") or [] if r) or "_No se encontraron reseñas de fuentes fiables._"
+        return head + (f"- **Dónde:** {g('where') or '—'}" + (f" · [Google Maps]({maps})" if maps else "") +
+                       f"\n- **Cuándo / horario:** {g('when') or '—'}\n- **Precio:** {g('price') or '—'}\n"
+                       f"- **Valoración:** {g('rating') or '—'}\n- **Web:** {g('url') or '—'}\n- **Post:** {post_url}\n\n"
+                       f"## Qué es\n{g('what')}\n\n## Reseñas\n{reviews}\n\n## Consejos\n{lst(d.get('steps'))}\n")
     if mode == "personal":
-        quote = "\n".join("> " + l for l in g("quote").splitlines()) if g("quote") else ""
-        return head + (f"{quote}\n\n" if quote else "") + f"## Mensaje\n{g('what')}\n\n## Por qué resuena\n{g('fit')}\n\n- **Post:** {post_url}\n"
+        quote = "\n".join("> " + l if l.strip() else ">" for l in g("quote").splitlines()) if g("quote") else ""
+        return head + (f"## Texto\n{quote}\n\n" if quote else "") + f"## Mensaje\n{g('what')}\n\n## Por qué resuena\n{g('fit')}\n\n- **Post:** {post_url}\n"
     if mode == "music":
         q = urllib.parse.quote(f"{g('artist')} {g('song')}".strip())
         return head + (f"- **Artista:** {g('artist') or '?'}\n- **Canción:** {g('song') or '?'}\n"
@@ -360,7 +389,25 @@ def body_for(mode, d, post_url):
     return head + f"- **Post:** {post_url}\n"  # private
 
 
-def write_note(mode, collection, d, post_url, brain, when):
+def save_pictures(code, imgs, n=4):
+    """Copy up to n of the post's pictures (photos, or one video frame) into the vault; returns their file names."""
+    if DRY or not imgs:
+        return []
+    from PIL import Image
+    os.makedirs(ASSETS, exist_ok=True)
+    frames_only = all(os.path.basename(p).startswith("frame") for p in imgs)
+    pick = [imgs[min(1, len(imgs) - 1)]] if frames_only else imgs[:n]   # a video: one frame from early in it
+    out = []
+    for i, src in enumerate(pick, 1):
+        name = f"{code}_{i}.jpg"
+        with Image.open(src) as im:
+            im = im.convert("RGB"); im.thumbnail((1200, 1200))
+            im.save(os.path.join(ASSETS, name), quality=85)
+        out.append(name)
+    return out
+
+
+def write_note(mode, collection, d, post_url, brain, when, pics=()):
     folder = os.path.join(BASE, MODES[mode]["folder"])
     os.makedirs(folder, exist_ok=True)
     name = f"{when:%Y-%m-%d} {slug(d['title'])}.md"
@@ -371,9 +418,11 @@ def write_note(mode, collection, d, post_url, brain, when):
     if mode == "idea":
         fm |= {"effort": d.get("effort", ""), "value": d.get("value", "")}
     if mode == "plan":
-        fm |= {"where": d.get("where", ""), "when": d.get("when", ""), "price": d.get("price", "")}
+        fm |= {"where": d.get("where", ""), "when": d.get("when", ""), "price": d.get("price", ""), "rating": d.get("rating", "")}
+    if pics:
+        fm["image"] = pics[0]
     front = "---\n" + "\n".join(f"{k}: {json.dumps(v, ensure_ascii=False)}" for k, v in fm.items()) + "\n---\n"
-    text = front + body_for(mode, d, post_url) + f"\n---\nVolver a [[{MODES[mode]['folder']}]] · [[Home]]\n"
+    text = front + body_for(mode, d, post_url, pics) + f"\n---\nVolver a [[{MODES[mode]['folder']}]] · [[Home]]\n"
     if DRY:
         log("[dry-run] note:", os.path.join(folder, name)); print(text); return name
     open(os.path.join(folder, name), "w", encoding="utf-8").write(text)
@@ -454,7 +503,8 @@ def process(cl, collection, mode, it, done):
             return None
         if not d.get("title"):
             d["title"] = d.get("one_liner") or it["code"]
-        note = write_note(mode, collection, d, post_url, brain, dt.date.today())
+        pics = save_pictures(it["code"], imgs) if mode in PICTURE_MODES else []
+        note = write_note(mode, collection, d, post_url, brain, dt.date.today(), pics)
         log(f"[{collection}] {d['title']} | {brain} | {note}")
         return d
     except Exception:
@@ -482,6 +532,10 @@ def main():
 
 
 def scan():
+    global ONLY
+    ONLY = run_collection()   # sync() and the queue below then handle only that collection
+    if ONLY:
+        log("collection:", ONLY)
     progress("Sincronizando Instagram…")
     state = json.load(open(STATE, encoding="utf-8")) if os.path.exists(STATE) else {}
     state.setdefault("collections", {}); state.setdefault("done", [])
@@ -499,7 +553,7 @@ def scan():
     queue_new, queue_old = [], []
     for name, mode in COLLECTIONS:
         c = state["collections"].get(name)
-        if not c:
+        if not c or (ONLY and norm(ONLY) != norm(name)):  # --only NAME: sync and process just that collection
             continue
         base = set(c["baseline"] or [])
         for it in (c["items"] if newest_first else reversed(c["items"])):  # items are stored newest first
@@ -542,6 +596,9 @@ def notify_item(mode, d, pk):
     if mode == "idea":
         parts += [f"**Claude:** {g('claude')}" if g("claude") else "", f"**HA:** {g('ha')}" if g("ha") else "",
                   f"**Esfuerzo:** {g('effort') or '?'} · **Valor:** {g('value') or '?'}"]
+    if mode == "plan":
+        parts += [f"📍 {g('where')}" if g("where") else "", f"⭐ {g('rating')}" if g("rating") else "",
+                  f"[Google Maps]({g('maps')})" if g("maps").startswith("https://") else ""]
     parts += [g("url"), f"Nota en Obsidian: {MODES[mode]['folder']}"]
     notify(f"{MODES[mode]['emoji']} {d['title']}", "\n\n".join(p for p in parts if p), f"insta_{mode}_{pk}")
 
