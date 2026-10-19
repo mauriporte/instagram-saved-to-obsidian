@@ -91,6 +91,13 @@ ticketing site, one item each as "date (day month year) — city, country — ve
 never invent dates. If the post is itself about a specific EVENT (a concert, festival, club night): kind = "event",
 where = venue + full address, when = exact date(s) with year, maps = a Google Maps link for the venue
 (https://www.google.com/maps/search/?api=1&query=<venue and address, URL-encoded>); otherwise leave those empty."""},
+    "home": {"folder": "Home Instagram", "emoji": "🏠", "notify": False,
+             "about": "trucos y cosas que hacer en casa",
+             "task": """{owner} saved this as a HOME TIP: something practical to do at home, nothing digital (cleaning,
+maintenance, small repairs, organising, decor, cooking tricks). Fill: what = a brief description of the tip and why it
+helps (1-2 sentences); steps = the tip as short, concrete steps (what to use, how, how often); quote = the full
+transcript of the text/speech ONLY if it is short (under about 120 words, open the images with the Read tool to read
+on-screen text), else "" (the steps are then the summary); price = rough cost of materials if any ("" if none)."""},
     "private": {"folder": "Privado Instagram", "emoji": "🔒", "notify": False,
                 "about": "colección privada",
                 "task": """This comes from a private collection. Write ONLY a short, neutral, non-explicit description
@@ -519,6 +526,10 @@ def body_for(mode, d, post_url, pics=()):
         return head + (f"- **Artista:** {artist}\n- **Canción:** {g('song') or '?'}\n"
                        f"- **Escuchar:** {g('url') or f'https://open.spotify.com/search/{q}'}\n- **Post:** {post_url}\n\n{g('what')}\n"
                        f"{event}\n## Próximos conciertos en Europa\n{tour}\n")
+    if mode == "home":
+        text = "\n".join("> " + l if l.strip() else ">" for l in g("quote").splitlines()) if g("quote") else ""
+        return head + (f"{g('what')}\n\n## Cómo\n{lst(d.get('steps')) or '—'}\n\n" + (f"## Texto\n{text}\n\n" if text else "") +
+                       (f"- **Coste:** {g('price')}\n" if g("price") else "") + f"- **Post:** {post_url}\n")
     return head + f"- **Post:** {post_url}\n"  # private
 
 
