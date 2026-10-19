@@ -16,3 +16,4 @@ scan.lock
 last_scan.json
 watcher-errors.log
 unsave_backlog.json
+spotify_token.json

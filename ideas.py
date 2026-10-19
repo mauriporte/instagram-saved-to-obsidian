@@ -569,6 +569,8 @@ def body_for(mode, d, post_url, pics=()):
             event = (f"\n## Evento\n- **Dónde:** {g('where') or '—'}" + (f" · [Google Maps]({maps})" if maps else "") +
                      f"\n- **Cuándo:** {g('when') or '—'}\n")
         tour = lst(d.get("tour")) or "_No se encontraron fechas próximas en Europa._"
+        follow = {"nuevo": "siguiendo (seguido ahora)", "ya": "siguiendo (ya lo seguías)"}.get(d.get("follow"), "")
+        artist += f" · Spotify: {follow}" if follow else ""
         return head + (f"- **Artista:** {artist}\n- **Canción:** {g('song') or '?'}\n"
                        f"- **Escuchar:** {g('url') or f'https://open.spotify.com/search/{q}'}\n- **Post:** {post_url}\n\n{g('what')}\n"
                        f"{event}\n## Próximos conciertos en Europa\n{tour}\n")
@@ -748,6 +750,12 @@ def process(cl, collection, mode, it, done):
         if not d.get("title"):
             d["title"] = d.get("one_liner") or it["code"]
         pics = save_pictures(it["code"], imgs) if mode in PICTURE_MODES else []
+        if mode == "music":  # follow the artist on Spotify (if logged in with spotify.py login)
+            try:
+                import spotify
+                d["follow"] = spotify.follow_artist(d.get("artist_url"))
+            except Exception as e:
+                log("spotify follow failed:", type(e).__name__, e)
         note = write_note(mode, collection, d, post_url, brain, dt.date.today(), pics)
         log(f"[{collection}] {d['title']} | {brain} | {note}")
         add_to_calendar(collection, d, post_url, it["pk"])
