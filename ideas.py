@@ -136,8 +136,9 @@ def run_collection():
         try:
             s = requests.get(f"{HA}/api/states/{ent}", headers={"Authorization": "Bearer " + ha_token()}, timeout=20).json()
             opts = s["attributes"]["options"]
-            if s["state"] in opts[1:] and any(norm(s["state"]) == norm(n) for n, _ in COLLECTIONS):
-                return s["state"]
+            name = re.sub(r" · \d+$", "", s["state"])  # options carry the posts left: "Work · 49"
+            if s["state"] in opts[1:] and any(norm(name) == norm(n) for n, _ in COLLECTIONS):
+                return name
         except Exception as e:
             log(f"collection: {ent} unreadable ({type(e).__name__}), using all")
     return None

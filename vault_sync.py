@@ -221,6 +221,17 @@ def publish_pending():
     ha("POST", "states/sensor.insta_ideas_pendientes", json={"state": sum(r["p"] for r in rows), "attributes": {
         "friendly_name": "Ideas: pendientes", "icon": "mdi:progress-clock", "unit_of_measurement": "posts",
         "last_sync": st.get("last_sync"), "rows": rows}})
+    ent = ideas.CFG.get("collection_entity")  # the scan's «Colección» selector shows the posts left: "Work · 49"
+    sel = ha("GET", f"states/{ent}") if ent else None
+    if sel is not None and sel.ok:
+        opts = sel.json()["attributes"]["options"]
+        base = lambda o: re.sub(r" · \d+$", "", o)
+        new = [f"{base(opts[0])} · {sum(r['p'] for r in rows)}"] + [f"{r['c']} · {r['p']}" for r in rows]
+        if opts != new:
+            current = base(sel.json()["state"])
+            ha("POST", "services/input_select/set_options", json={"entity_id": ent, "options": new})
+            keep = next((o for o in new if base(o) == current), new[0])
+            ha("POST", "services/input_select/select_option", json={"entity_id": ent, "option": keep})
     for r in rows:  # one sensor per collection, for the clickable list (a row selects that collection in the viewer)
         ha("POST", f"states/sensor.insta_ideas_pendientes_{col_slug(r['c'])}", json={"state": r["p"], "attributes": {
             "friendly_name": r["c"], "icon": "mdi:folder-clock-outline", "unit_of_measurement": f"de {r['t']}",
