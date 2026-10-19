@@ -91,6 +91,16 @@ ticketing site, one item each as "date (day month year) — city, country — ve
 never invent dates. If the post is itself about a specific EVENT (a concert, festival, club night): kind = "event",
 where = venue + full address, when = exact date(s) with year, maps = a Google Maps link for the venue
 (https://www.google.com/maps/search/?api=1&query=<venue and address, URL-encoded>); otherwise leave those empty."""},
+    "food": {"folder": "Food Instagram", "emoji": "🍳", "notify": False,
+             "about": "recetas y sugerencias de comida",
+             "task": """{owner} saved this as FOOD: a recipe or a food suggestion. Write the recipe in text (in the
+note's language): title = the dish; what = a short description of the dish and its origin (1-2 sentences);
+ingredients = every ingredient with its quantity, one item each (from the caption, the on-screen text in the images and
+the spoken transcript; open the images with the Read tool); steps = the preparation, one step per item, with times and
+temperatures; price = "" unless stated. If the post doesn't give the full recipe, complete it from a reputable recipe
+source (WebSearch/WebFetch) and say so in the first step. Cross-check the dish with other versions: variants = other
+known versions of the same dish, one item each as "Country/region — how it differs" (e.g. "Italia — sin nata, con
+guanciale"); [] if it has no notable variants. url = the source recipe if you used one, else ""."""},
     "learn": {"folder": "Learn Instagram", "emoji": "🎓", "notify": False,
               "about": "cursos y cosas que aprender",
               "task": """{owner} saved this to LEARN: a course, workshop, tutorial series, book or topic to study. Identify
@@ -347,7 +357,9 @@ def sync(cl, state):
     """Refresh the cached item lists. Full list once a week (or first time), otherwise only the newest page."""
     from instagrapi.exceptions import LoginRequired
     try:
-        by_name = {norm(c.name): c.id for c in cl.collections()}
+        cols = cl.collections()
+        by_name = {norm(c.name): c.id for c in cols}
+        state["ig_collections"] = {c.name.strip(): c.media_count for c in cols if c.name.strip() != "All posts"}  # every IG collection, for HA
         week = state.get("full_sync", "") < (dt.date.today() - dt.timedelta(days=7)).isoformat()
         for name, mode in COLLECTIONS:
             pk = by_name.get(norm(name))
@@ -370,15 +382,22 @@ def sync(cl, state):
     cl.dump_settings(SESSION)  # keep refreshed cookies
 
 
-def download(cl, it, folder):
+def download(cl, it, folder, kind=None):
     """Local files (videos/photos) for the item. Read-only GETs."""
-    pk = int(it["pk"])
-    if it["type"] == 2:
-        return [str(cl.video_download(pk, folder))]
-    if it["type"] == 1:
-        return [str(cl.photo_download(pk, folder))]
-    if it["type"] == 8:
-        return [str(p) for p in cl.album_download(pk, folder)]
+    pk, kind = int(it["pk"]), kind or it["type"]
+    try:
+        if kind == 2:
+            return [str(cl.video_download(pk, folder))]
+        if kind == 1:
+            return [str(cl.photo_download(pk, folder))]
+        if kind == 8:
+            return [str(p) for p in cl.album_download(pk, folder)]
+    except AssertionError:  # instagrapi: the saved list's media type was stale ("Must been photo"); ask the post itself
+        real = cl.media_info(pk).media_type
+        if real != kind and kind == it["type"]:  # one retry with the real type
+            log(f"{it['code']}: type {kind} in the list, {real} in fact; retrying")
+            return download(cl, it, folder, real)
+        raise
     return []
 
 
@@ -446,11 +465,11 @@ tags (one-word list)."""
 SCHEMA = {"type": "object",
           "required": ["relevant", "title", "one_liner", "url", "what", "fit", "steps", "effort", "value",
                        "claude", "ha", "pros", "cons", "where", "when", "kind", "price", "maps", "rating", "reviews",
-                       "quote", "artist", "song", "artist_url", "tour", "start", "end", "github", "signup", "format", "tags"],
+                       "quote", "artist", "song", "artist_url", "tour", "start", "end", "github", "signup", "format", "ingredients", "variants", "tags"],
           "properties": {k: {"type": "string"} for k in ("title", "one_liner", "url", "what", "fit", "claude", "ha",
                                                          "where", "when", "price", "maps", "rating", "quote", "artist", "song",
                                                          "artist_url", "start", "end", "github", "signup", "format")}
-          | {k: {"type": "array", "items": {"type": "string"}} for k in ("pros", "cons", "reviews", "tour")}
+          | {k: {"type": "array", "items": {"type": "string"}} for k in ("pros", "cons", "reviews", "tour", "ingredients", "variants")}
           | {"relevant": {"type": "boolean"}, "steps": {"type": "array", "items": {"type": "string"}},
              "tags": {"type": "array", "items": {"type": "string"}},
              "kind": {"type": "string", "enum": ["event", "place", "activity", ""]},
@@ -536,6 +555,12 @@ def body_for(mode, d, post_url, pics=()):
         return head + (f"- **Artista:** {artist}\n- **Canción:** {g('song') or '?'}\n"
                        f"- **Escuchar:** {g('url') or f'https://open.spotify.com/search/{q}'}\n- **Post:** {post_url}\n\n{g('what')}\n"
                        f"{event}\n## Próximos conciertos en Europa\n{tour}\n")
+    if mode == "food":
+        ing = "\n".join(f"- {x}" for x in d.get("ingredients") or [] if x) or "—"
+        var = "\n".join(f"- {x}" for x in d.get("variants") or [] if x) or "_No se conocen otras versiones destacadas._"
+        return head + (f"{g('what')}\n\n## Ingredientes\n{ing}\n\n## Preparación\n{lst(d.get('steps')) or '—'}\n\n"
+                       f"## Otras versiones\n{var}\n\n" + (f"- **Receta de referencia:** {g('url')}\n" if g("url") else "")
+                       + f"- **Post:** {post_url}\n")
     if mode == "learn":
         fmt = {"online": "Online (virtual)", "presencial": "Presencial", "mixto": "Mixto (online y presencial)"}.get(g("format"), g("format") or "?")
         maps = g("maps") if g("maps").startswith("https://") else ""

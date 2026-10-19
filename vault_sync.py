@@ -122,8 +122,8 @@ LINKS_COLLECTION = ideas.CFG.get("links", {}).get("collection", "Work")
 
 
 def mode_of(collection):
-    """Folder/mode a collection's notes belong in: its configured mode; links (and unknown names) are ideas."""
-    return next((m for n, m in ideas.COLLECTIONS if ideas.norm(n) == ideas.norm(collection)), "idea")
+    """Folder/mode a collection's notes belong in: its configured mode; None for a collection that is not configured."""
+    return next((m for n, m in ideas.COLLECTIONS if ideas.norm(n) == ideas.norm(collection)), None)  # None: not configured (any more)
 
 
 def all_notes():
@@ -150,7 +150,7 @@ def relocate(notes_):
     moved = 0
     for n in notes_:
         mode = mode_of(n["collection"])
-        if mode == n["mode"]:
+        if mode is None or mode == n["mode"]:  # unknown collections (e.g. deleted ones) stay where they are
             continue
         dest_dir = os.path.join(ideas.BASE, ideas.MODES[mode]["folder"])
         os.makedirs(dest_dir, exist_ok=True)
@@ -184,7 +184,7 @@ def check_move(st, save):
     if idea_sel.json()["attributes"].get("options") != labels:
         ha("POST", "services/input_select/set_options", json={"entity_id": MOVE_IDEA, "options": labels})
     names = view.json()["attributes"].get("options") or []
-    targets = names + [n for n, _ in ideas.COLLECTIONS if n not in names]
+    targets = sorted(set(names) | {n for n, _ in ideas.COLLECTIONS}, key=ideas.norm)  # alphabetical
     if to_sel.json()["attributes"].get("options") != targets:
         ha("POST", "services/input_select/set_options", json={"entity_id": MOVE_TO, "options": targets})
     chosen, target = idea_sel.json()["state"], to_sel.json()["state"]
@@ -242,16 +242,59 @@ def publish_pending():
     if sel is not None and sel.ok:
         opts = sel.json()["attributes"]["options"]
         base = lambda o: re.sub(r" · \d+$", "", o)
-        new = [f"Todas · {sum(r['p'] for r in rows)}"] + [f"{r['c']} · {r['p']}" for r in rows]  # 1st option = all collections (the scan only checks its position)
+        new = [f"Todas · {sum(r['p'] for r in rows)}"] + [f"{r['c']} · {r['p']}" for r in sorted(rows, key=lambda r: ideas.norm(r["c"]))]  # 1st option = all collections (the scan only checks its position)
         if opts != new:
             current = base(sel.json()["state"])
             ha("POST", "services/input_select/set_options", json={"entity_id": ent, "options": new})
             keep = next((o for o in new if base(o) == current), new[0])
             ha("POST", "services/input_select/select_option", json={"entity_id": ent, "option": keep})
+    ig = st.get("ig_collections") or {}  # every Instagram collection with its saved count, from the last sync
     for r in rows:  # one sensor per collection, for the clickable list (a row selects that collection in the viewer)
+        total = ig.get(next((n for n in ig if ideas.norm(n) == ideas.norm(r["c"])), ""), r["t"])
         ha("POST", f"states/sensor.insta_ideas_pendientes_{col_slug(r['c'])}", json={"state": r["p"], "attributes": {
-            "friendly_name": r["c"], "icon": "mdi:folder-clock-outline", "unit_of_measurement": f"de {r['t']}",
-            "collection": r["c"], "set_aside": r["f"]}})
+            "friendly_name": r["c"], "icon": "mdi:folder-clock-outline", "unit_of_measurement": f"de {total}",
+            "collection": r["c"], "set_aside": r["f"], "processed": True}})
+    configured = {ideas.norm(r["c"]) for r in rows}
+    for name, count in ig.items():  # Instagram collections Insta-Ideas doesn't process: just how many are saved
+        if ideas.norm(name) not in configured:
+            ha("POST", f"states/sensor.insta_ideas_pendientes_{col_slug(name)}", json={"state": count, "attributes": {
+                "friendly_name": name, "icon": "mdi:folder-off-outline", "unit_of_measurement": "guardados · no se procesa",
+                "collection": name, "processed": False}})
+    names = sorted({r["c"] for r in rows} | {n for n in ig if ideas.norm(n) not in configured}, key=ideas.norm)
+    sync_pending_card(names, {ideas.norm(r["c"]) for r in rows})
+
+
+PENDING_CARD = "Pendientes por colección"
+
+
+def sync_pending_card(names, processed):
+    """Keep the dashboard list «Pendientes por colección» = every collection, alphabetical (rebuilt when the set changes).
+    Processed collections select themselves in «Ver colección» when tapped; the others are just counts."""
+    dash = ideas.CFG.get("ideas_dashboard", "dashboard-ideas")
+    key = "|".join(names)
+    if getattr(sync_pending_card, "last", None) == key:
+        return
+    import websocket  # websocket-client: dashboards are only editable over Home Assistant's WebSocket API
+    ws = websocket.create_connection(ideas.HA.replace("http", "ws", 1) + "/api/websocket", timeout=20)
+    try:
+        ws.recv(); ws.send(json.dumps({"type": "auth", "access_token": ideas.ha_token()})); ws.recv()
+        ws.send(json.dumps({"id": 1, "type": "lovelace/config", "url_path": dash}))
+        cfg = json.loads(ws.recv())["result"]
+        card = next((c for v in cfg["views"] for s in v.get("sections", []) for c in s.get("cards", [])
+                     if c.get("type") == "entities" and c.get("title") == PENDING_CARD), None)
+        if card is None:
+            return
+        rows = [{"entity": f"sensor.insta_ideas_pendientes_{col_slug(n)}", "name": n} | (
+                    {"tap_action": {"action": "perform-action", "perform_action": "input_select.select_option",
+                                    "target": {"entity_id": VIEW_SELECT}, "data": {"option": n}}}
+                    if ideas.norm(n) in processed else {"tap_action": {"action": "none"}}) for n in names]
+        if card.get("entities") != rows:
+            card["entities"] = rows
+            ws.send(json.dumps({"id": 2, "type": "lovelace/config/save", "url_path": dash, "config": cfg}))
+            log(f"[vault] {PENDING_CARD}: {len(rows)} collections", json.loads(ws.recv()).get("success"))
+        sync_pending_card.last = key
+    finally:
+        ws.close()
 
 
 def publish_collections():
@@ -268,7 +311,7 @@ def publish_collections():
             "st": n.get("status", ""), "p": f"{rel}/{n['file']}"})
     order = [n for n, _ in ideas.COLLECTIONS] + sorted(set(groups) - {n for n, _ in ideas.COLLECTIONS})
     configured = {n for n, _ in ideas.COLLECTIONS}
-    names = [n for n in order if n in groups or n in configured]  # every collection, even with no notes yet
+    names = sorted((n for n in order if n in groups or n in configured), key=ideas.norm)  # every collection, alphabetical
     for name in names:
         items = sorted(groups.get(name, []), key=lambda x: (x["d"], x["p"]), reverse=True)
         ha("POST", f"states/sensor.ideas_coleccion_{col_slug(name)}", json={"state": len(items), "attributes": {
