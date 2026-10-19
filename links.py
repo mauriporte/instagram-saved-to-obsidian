@@ -61,12 +61,22 @@ def media(url, folder):
     return got.get("audio"), got.get("video"), title, desc
 
 
+class Busy(Exception):
+    """A scan is using the Instagram session: try this link again next cycle."""
+
+
 def analyse(url):
     """Idea dict for one link, or None. Instagram goes through ideas.process (same as the collections)."""
     if re.search(r"instagram\.com/(p|reel|reels|tv)/", url):
-        cl = ideas.client()
-        it = ideas.item(cl.media_info(cl.media_pk_from_url(url)))
-        return ideas.process(cl, COLLECTION, "idea", it, set()), it["pk"]
+        lock = ideas.scan_lock()  # one user of the Instagram session at a time (scans hold the same lock)
+        if not lock:
+            raise Busy(url)
+        try:
+            cl = ideas.client()
+            it = ideas.item(cl.media_info(cl.media_pk_from_url(url)))
+            return ideas.process(cl, COLLECTION, "idea", it, set()), it["pk"]
+        finally:
+            lock.close()
     tmp = tempfile.mkdtemp(prefix="link_", dir=ideas.HERE)
     try:
         audio, video, title, desc = media(url, tmp)
@@ -105,6 +115,8 @@ def handle(url, st):
         return None
     try:
         d, nid = analyse(url)
+    except Busy:
+        raise
     except Exception:
         log("[links] FAILED", url, traceback.format_exc().splitlines()[-1]); return None
     finally:
@@ -131,7 +143,10 @@ def from_ha(st):
         urls = LINK_RE.findall(f'{it.get("summary", "")} {it.get("description") or ""}')
         if not urls:
             continue
-        titles = [t for t in (handle(u, st) for u in urls) if t]
+        try:
+            titles = [t for t in (handle(u, st) for u in urls) if t]
+        except Busy:
+            log("[links] Instagram busy (scan running): link postponed"); continue
         ha("POST", "services/todo/update_item", json={"entity_id": ent, "item": it["uid"], "status": "completed",
             "description": ((it.get("description") or "") + "\n" + " · ".join(f"💡 {t}" for t in titles)).strip()})
 
@@ -158,12 +173,15 @@ def from_beeper(st):
             for m in reversed(msgs):  # oldest first
                 if m["id"] in seen:
                     continue
-                seen.append(m["id"]); del seen[:-500]; save_state(st)
                 for u in LINK_RE.findall(m.get("text") or ""):
-                    t = handle(u, st)
+                    try:
+                        t = handle(u, st)
+                    except Busy:  # a scan has the Instagram session: leave this message for the next cycle
+                        log("[links] Instagram busy (scan running): message postponed"); return
                     if t:
                         requests.post(f"{B}/v1/chats/{q(chat['id'])}/messages", headers=H, timeout=20,
                                       json={"text": f"💡 Idea guardada: {t}"})
+                seen.append(m["id"]); del seen[:-500]; save_state(st)
 
 
 def heartbeat(st):
