@@ -404,6 +404,7 @@ def run():
     try:
         publish_collections()
         publish_pending()
+        ideas.retry_calendar()  # Attending events that could not be added yet
     except Exception as e:
         log("[vault] collections error:", type(e).__name__, e)
     text = render(ns)

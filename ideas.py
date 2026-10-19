@@ -69,7 +69,9 @@ kind: "event" if it happens on specific dates (concert, festival, exhibition, ma
 thing), "place" for a permanent venue (restaurant, bar, shop, viewpoint), "activity" otherwise. For an EVENT the date is
 MANDATORY: `when` must contain the exact date(s) — day, month and year — and the time if known, found on the official
 site or ticketing pages (WebSearch/WebFetch). If it already happened, still give its date and add "(ya pasó)"; if it
-recurs (yearly festival, weekly market), give the next edition's date."""},
+recurs (yearly festival, weekly market), give the next edition's date. For an EVENT also fill start and end in ISO 8601
+local time: "YYYY-MM-DDTHH:MM" when the time is known, else "YYYY-MM-DD" (end = last day for multi-day events; "" if
+unknown); for anything else leave start and end empty."""},
     "personal": {"folder": "Personal Instagram", "emoji": "🪞", "notify": False,
                  "about": "reflexiones, frases y cosas personales",
                  "task": """{owner} saved this for personal reasons: a quote, a reflection, something deep or meaningful
@@ -212,6 +214,83 @@ def notify(title, message, nid):
     log("HA notification", r.status_code)
 
 
+CALENDAR = CFG.get("calendar") or {}  # {"entity": "calendar.x", "collections": ["Attending"]}: events go to that calendar
+CALENDAR_LOG = os.path.join(HERE, "calendar_added.json")
+
+
+def event_times(d):
+    """HA calendar.create_event times from the idea's ISO start/end: timed (default 2 h) or all-day (end exclusive)."""
+    s, e = (d.get("start") or "").strip(), (d.get("end") or "").strip()
+    if re.fullmatch(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2})?", s):
+        start = dt.datetime.fromisoformat(s)
+        end = dt.datetime.fromisoformat(e) if re.fullmatch(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2})?", e) else None
+        end = end if end and end > start else start + dt.timedelta(hours=2)
+        return {"start_date_time": start.isoformat(timespec="minutes"), "end_date_time": end.isoformat(timespec="minutes")}
+    if re.fullmatch(r"\d{4}-\d{2}-\d{2}", s[:10]) if s else False:
+        start = dt.date.fromisoformat(s[:10])
+        end = dt.date.fromisoformat(e[:10]) if re.fullmatch(r"\d{4}-\d{2}-\d{2}", e[:10]) else start
+        return {"start_date": start.isoformat(), "end_date": (max(end, start) + dt.timedelta(days=1)).isoformat()}
+    return None
+
+
+def add_to_calendar(collection, d, post_url, key):
+    """A complete, dated event from a calendar collection (config "calendar") becomes a calendar event, once per post."""
+    if DRY or not (HA and CALENDAR.get("entity")) or norm(collection) not in {norm(c) for c in CALENDAR.get("collections", [])}:
+        return
+    if d.get("kind") != "event" or d.get("incomplete") or not (times := event_times(d)):
+        notify("📅 No añadido al calendario", f"«{d.get('title')}» ({collection}) no tiene fecha y hora claras. {post_url}",
+               f"insta_cal_{key}")
+        return
+    added = json.load(open(CALENDAR_LOG, encoding="utf-8")) if os.path.exists(CALENDAR_LOG) else []
+    if str(key) in added:
+        return
+    g = lambda k: (d.get(k) or "").strip()
+    desc = "\n".join(x for x in (g("one_liner"), g("when"), g("price") and f"Precio: {g('price')}",
+                                 g("maps") and f"Maps: {g('maps')}", g("url") and f"Web: {g('url')}", f"Post: {post_url}") if x)
+    event = {"entity_id": CALENDAR["entity"], "summary": d["title"], "description": desc, "location": g("where"), **times}
+    if create_event(event):
+        json.dump(added + [str(key)], open(CALENDAR_LOG, "w", encoding="utf-8"))
+    else:  # calendar unavailable (HA would silently skip the call): retried every watcher cycle
+        pending = json.load(open(CALENDAR_PENDING, encoding="utf-8")) if os.path.exists(CALENDAR_PENDING) else {}
+        pending[str(key)] = event
+        json.dump(pending, open(CALENDAR_PENDING, "w", encoding="utf-8"), ensure_ascii=False)
+        log(f"[calendar] {d['title']}: calendar unavailable, will retry")
+
+
+CALENDAR_PENDING = os.path.join(HERE, "calendar_pending.json")
+
+
+def create_event(event):
+    """calendar.create_event, only when the calendar entity is available (HA answers 200 and does nothing otherwise)."""
+    H = {"Authorization": "Bearer " + ha_token()}
+    try:
+        s = requests.get(f"{HA}/api/states/{event['entity_id']}", headers=H, timeout=20)
+        if not s.ok or s.json().get("state") in ("unavailable", "unknown"):
+            return False
+        r = requests.post(f"{HA}/api/services/calendar/create_event", timeout=30, headers=H, json=event)
+    except requests.RequestException:
+        return False
+    if r.ok:
+        log(f"[calendar] {event['summary']} -> {event['entity_id']}")
+    return r.ok
+
+
+def retry_calendar():
+    """Events that could not be added (calendar unavailable) are tried again; called every watcher cycle."""
+    if not os.path.exists(CALENDAR_PENDING):
+        return
+    pending = json.load(open(CALENDAR_PENDING, encoding="utf-8"))
+    added = json.load(open(CALENDAR_LOG, encoding="utf-8")) if os.path.exists(CALENDAR_LOG) else []
+    for key, event in list(pending.items()):
+        if key in added or create_event(event):
+            pending.pop(key); added = sorted(set(added) | {key})
+    json.dump(added, open(CALENDAR_LOG, "w", encoding="utf-8"))
+    if pending:
+        json.dump(pending, open(CALENDAR_PENDING, "w", encoding="utf-8"), ensure_ascii=False)
+    else:
+        os.remove(CALENDAR_PENDING)
+
+
 # ---------- Instagram (read-only) ----------
 def ha_on(key):
     """True if the HA input_boolean named by config key `key` is on; off if missing, unreadable or a dry run."""
@@ -350,10 +429,10 @@ tags (one-word list)."""
 SCHEMA = {"type": "object",
           "required": ["relevant", "title", "one_liner", "url", "what", "fit", "steps", "effort", "value",
                        "claude", "ha", "pros", "cons", "where", "when", "kind", "price", "maps", "rating", "reviews",
-                       "quote", "artist", "song", "artist_url", "tour", "tags"],
+                       "quote", "artist", "song", "artist_url", "tour", "start", "end", "tags"],
           "properties": {k: {"type": "string"} for k in ("title", "one_liner", "url", "what", "fit", "claude", "ha",
                                                          "where", "when", "price", "maps", "rating", "quote", "artist", "song",
-                                                         "artist_url")}
+                                                         "artist_url", "start", "end")}
           | {k: {"type": "array", "items": {"type": "string"}} for k in ("pros", "cons", "reviews", "tour")}
           | {"relevant": {"type": "boolean"}, "steps": {"type": "array", "items": {"type": "string"}},
              "tags": {"type": "array", "items": {"type": "string"}},
@@ -595,6 +674,7 @@ def process(cl, collection, mode, it, done):
         pics = save_pictures(it["code"], imgs) if mode in PICTURE_MODES else []
         note = write_note(mode, collection, d, post_url, brain, dt.date.today(), pics)
         log(f"[{collection}] {d['title']} | {brain} | {note}")
+        add_to_calendar(collection, d, post_url, it["pk"])
         return d
     except Exception as e:
         if type(e).__name__ in ("LoginRequired", "ChallengeRequired"):  # session expired: stop the scan, don't blame the post

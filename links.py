@@ -116,7 +116,9 @@ def analyse(url, collection=COLLECTION, mode="idea"):
         d["title"] = d.get("title") or d.get("one_liner") or url
         note = ideas.write_note(mode, collection, d, url, brain, dt.date.today())  # links are always filed
         log(f"[{collection}] {d['title']} | {brain} | {note}")
-        return d, re.sub(r"\W+", "_", url)[-60:]
+        key = re.sub(r"\W+", "_", url)[-60:]
+        ideas.add_to_calendar(collection, d, url, key)
+        return d, key
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 
