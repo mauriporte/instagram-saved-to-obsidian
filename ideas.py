@@ -512,7 +512,10 @@ def process(cl, collection, mode, it, done):
         note = write_note(mode, collection, d, post_url, brain, dt.date.today(), pics)
         log(f"[{collection}] {d['title']} | {brain} | {note}")
         return d
-    except Exception:
+    except Exception as e:
+        if type(e).__name__ in ("LoginRequired", "ChallengeRequired"):  # session expired: stop the scan, don't blame the post
+            notify("⚠️ Instagram guardados", "La sesión de Instagram ha caducado. Hay que renovarla (pídeselo a Claude).", "insta_ideas_session")
+            raise SystemExit("session expired")
         log(f"[{collection}] FAILED {post_url}", traceback.format_exc().splitlines()[-1])
         return None
     finally:
@@ -578,7 +581,7 @@ def scan():
         if not d and it["pk"] not in done:  # failed (not just "not relevant"): count it
             failed[it["pk"]] = failed.get(it["pk"], 0) + 1
         save()
-        ok += bool(d)
+        ok += it["pk"] in done  # handled, including "not relevant" skips (only failures don't count)
         if d and MODES[mode]["notify"]:
             results.append((mode, d, it["pk"]))
     for mode, d, pk in results:  # one notification per idea/plan

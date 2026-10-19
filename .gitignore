@@ -14,3 +14,4 @@ link_*/
 __pycache__/
 scan.lock
 last_scan.json
+watcher-errors.log
