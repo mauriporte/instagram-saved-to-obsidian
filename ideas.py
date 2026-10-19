@@ -571,6 +571,7 @@ def body_for(mode, d, post_url, pics=()):
         tour = lst(d.get("tour")) or "_No se encontraron fechas próximas en Europa._"
         follow = {"nuevo": "siguiendo (seguido ahora)", "ya": "siguiendo (ya lo seguías)"}.get(d.get("follow"), "")
         artist += f" · Spotify: {follow}" if follow else ""
+        artist += " · canción añadida a tu biblioteca" if d.get("liked") else ""
         return head + (f"- **Artista:** {artist}\n- **Canción:** {g('song') or '?'}\n"
                        f"- **Escuchar:** {g('url') or f'https://open.spotify.com/search/{q}'}\n- **Post:** {post_url}\n\n{g('what')}\n"
                        f"{event}\n## Próximos conciertos en Europa\n{tour}\n")
@@ -754,6 +755,8 @@ def process(cl, collection, mode, it, done):
             try:
                 import spotify
                 d["follow"] = spotify.follow_artist(d.get("artist_url"))
+                if d["follow"] == "nuevo" and spotify.save_track(d.get("url")):  # new artist: keep the song too
+                    d["liked"] = True
             except Exception as e:
                 log("spotify follow failed:", type(e).__name__, e)
         note = write_note(mode, collection, d, post_url, brain, dt.date.today(), pics)

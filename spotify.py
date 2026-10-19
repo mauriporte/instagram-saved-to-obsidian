@@ -5,7 +5,8 @@ One-time login:  python spotify.py login
   client secret is needed. Your browser opens Spotify's consent page; you log in and approve there. The resulting token
   (renewable) is kept in spotify_token.json next to this file (git-ignored).
 
-Then ideas.py calls follow_artist(<Spotify artist URL or id>) for each Música post.
+Then ideas.py calls follow_artist(<Spotify artist URL or id>) for each Música post and, when the artist is newly
+followed, save_track(<Spotify track URL>) to add the song to Liked Songs.
 """
 import base64, hashlib, json, os, secrets, sys, time, urllib.parse, webbrowser
 from http.server import BaseHTTPRequestHandler, HTTPServer
@@ -14,7 +15,7 @@ import requests
 HERE = os.path.dirname(os.path.abspath(__file__))
 CFG = json.load(open(os.path.join(HERE, "config.json"), encoding="utf-8")).get("spotify") or {}
 TOKEN = os.path.join(HERE, "spotify_token.json")
-SCOPES = "user-follow-read user-follow-modify"
+SCOPES = "user-follow-read user-follow-modify user-library-modify"
 
 
 def login():
@@ -94,6 +95,21 @@ def follow_artist(url_or_id):
         return "ya"
     r = requests.put("https://api.spotify.com/v1/me/following", params={"type": "artist", "ids": aid}, headers=H, timeout=20)
     return "nuevo" if r.status_code in (200, 204) else None
+
+
+def track_id(url):
+    m = urllib.parse.urlsplit(url or "")
+    return m.path.split("/track/")[1].split("/")[0] if "open.spotify.com" in m.netloc and "/track/" in m.path else None
+
+
+def save_track(url):
+    """Add a Spotify track to the user's Liked Songs; True if it was saved."""
+    tid, tok = track_id(url), access_token()
+    if not (tid and tok):
+        return False
+    r = requests.put("https://api.spotify.com/v1/me/tracks", params={"ids": tid},
+                     headers={"Authorization": "Bearer " + tok}, timeout=20)
+    return r.status_code in (200, 201, 204)
 
 
 if __name__ == "__main__":
