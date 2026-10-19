@@ -70,12 +70,13 @@ def sync_todo(items_notes, st):
     items = (r.json().get("service_response") or {}).get(TODO, {}).get("items", [])
     cleared = set(st.get("cleared", []))  # removed with «Vaciar lista»: the notes keep their status, they don't come back
     btn = ha("GET", f"states/{CLEAR_BTN}")
-    if btn.ok and pressed_since(btn, "clear_seen", st, lambda s: None) and items:
+    if btn.ok and pressed_since(btn, "clear_seen", st, lambda s: None):
         for it in items:
             m = re.search(r"nota: (.+\.md)\s*$", it.get("description") or "")
             if m:
                 cleared.add(m.group(1))
         ha("POST", "services/todo/remove_item", json={"entity_id": TODO, "item": [it["uid"] for it in items]})
+        st["reviewed"] = sorted(set(st.get("reviewed", [])) | {n["file"] for n in all_notes()})  # «Ideas nuevas» back to 0
         log(f"[vault] Ideas list emptied: {len(items)} items (notes unchanged)")
         items = []
     st["cleared"] = sorted(cleared)
@@ -109,18 +110,27 @@ def sync_todo(items_notes, st):
     st["synced"] = sorted(synced)
 
 
-def publish_sensor(items_notes):
-    """sensor.ideas_nuevas: count of ideas not yet hecha/descartada, newest first, each with the path Home Assistant's
-    Notes Vault panel opens (/notes-vault?path=…). Pushed every cycle (REST states do not survive a HA restart)."""
+def publish_sensor(st):
+    """Counters for the Ideas dashboard, over every Insta-Ideas note (all collections):
+    sensor.ideas_nuevas = still open and not reviewed yet («Vaciar lista» marks everything processed so far as reviewed),
+    newest first with the path the Notes Vault panel opens; sensor.ideas_total = every idea processed;
+    sensor.ideas_completadas = marked complete ("hecha"). Pushed every cycle (REST states do not survive a HA restart)."""
     if not ideas.HA:
         return
-    pend = sorted((n for n in items_notes if n.get("status", "nueva") not in DONE), key=lambda n: (n.get("created", ""), n["file"]), reverse=True)
-    rel = os.path.relpath(IDEAS_DIR, ideas.VAULT).replace(os.sep, "/")
+    every = all_notes()
+    reviewed = set(st.get("reviewed", []))
+    pend = sorted((n for n in every if n.get("status", "nueva") not in DONE and n["file"] not in reviewed),
+                  key=lambda n: (n.get("created", ""), n["file"]), reverse=True)
+    rel = lambda n: os.path.relpath(n["path"], ideas.VAULT).replace(os.sep, "/")
     items = [{"title": n["title"], "summary": n.get("summary", ""), "effort": n.get("effort", ""), "value": n.get("value", ""),
-              "collection": n.get("collection", ""), "path": f"{rel}/{n['file']}"} for n in pend]
+              "collection": n.get("collection", ""), "path": rel(n)} for n in pend]
     ha("POST", "states/sensor.ideas_nuevas", json={"state": len(items), "attributes": {
         "friendly_name": "Ideas nuevas", "icon": "mdi:lightbulb-on", "unit_of_measurement": "ideas",
         "items": items[:30], "dashboard_path": "20-dashboards/Dashboards.md"}})
+    ha("POST", "states/sensor.ideas_total", json={"state": len(every), "attributes": {
+        "friendly_name": "Ideas procesadas", "icon": "mdi:lightbulb-group", "unit_of_measurement": "ideas"}})
+    ha("POST", "states/sensor.ideas_completadas", json={"state": sum(n.get("status") == "hecha" for n in every), "attributes": {
+        "friendly_name": "Completadas", "icon": "mdi:check-circle", "unit_of_measurement": "ideas"}})
 
 
 VIEW_SELECT = ideas.CFG.get("collection_view_entity", "input_select.ideas_ver_coleccion")
@@ -211,6 +221,11 @@ def check_move(st, save):
         relocate([n])
         ideas.notify("📂 Idea movida", f"«{n['title']}»: {viewed} → {target}", "ideas_movida")
         publish_collections()
+    cbtn = get(COMPLETE_BTN)
+    if cbtn.ok and pressed_since(cbtn, "complete_seen", st, save) and n and n.get("status") != "hecha":
+        set_status(n["path"], "hecha")  # the Ideas list ticks it on the next sync
+        ideas.notify("✅ Idea completada", f"«{n['title']}» ({viewed}) marcada como completada.", "ideas_completada")
+        publish_collections()
     dbtn = get(DELETE_BTN)
     if dbtn.ok and pressed_since(dbtn, "delete_seen", st, save) and n:
         trash = os.path.join(ideas.VAULT, ".trash")  # Obsidian's own trash: the note can be restored from there
@@ -225,6 +240,7 @@ def check_move(st, save):
 
 
 DELETE_BTN = ideas.CFG.get("delete_button", "input_button.eliminar_idea")
+COMPLETE_BTN = ideas.CFG.get("complete_button", "input_button.completar_idea")
 
 
 def pressed_since(btn, key, st, save):
@@ -539,7 +555,7 @@ def run():
         log("[vault] todo sync error:", type(e).__name__, e)
     ns = notes()  # statuses may have changed
     try:
-        publish_sensor(ns)
+        publish_sensor(st)
     except Exception as e:
         log("[vault] sensor error:", type(e).__name__, e)
     try:
