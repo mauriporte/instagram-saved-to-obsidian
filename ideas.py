@@ -681,7 +681,7 @@ def ensure_index(mode):
         return
     today = dt.date.today().isoformat()
     cols = {"idea": "summary, effort, value, status, url", "plan": "summary, where, when, price, status",
-            "personal": "summary, collection", "music": "summary, url", "private": "summary"}[mode]
+            "personal": "summary, collection", "music": "summary, url", "private": "summary"}.get(mode, "summary, collection, status")
     open(p, "w", encoding="utf-8").write(f"""---
 type: project
 tags: [project, instagram, {mode}]
