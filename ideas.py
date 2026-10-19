@@ -63,7 +63,12 @@ maps (a Google Maps link for that exact place: https://www.google.com/maps/searc
 URL-encoded>), rating (e.g. "Google 4.6 (2,300 reseñas)" if you can confirm it, else ""), reviews (2-4 items, each
 "Source — rating if any — one-sentence summary — URL", ONLY from reputable sources you actually found: Google Maps,
 TripAdvisor, Michelin Guide, Guía Repsol, well-known newspapers/magazines; never invent reviews; [] if none found),
-steps (practical tips as a list: booking, best time, what to order/see)."""},
+steps (practical tips as a list: booking, best time, what to order/see).
+kind: "event" if it happens on specific dates (concert, festival, exhibition, market, opening, show, limited-time
+thing), "place" for a permanent venue (restaurant, bar, shop, viewpoint), "activity" otherwise. For an EVENT the date is
+MANDATORY: `when` must contain the exact date(s) — day, month and year — and the time if known, found on the official
+site or ticketing pages (WebSearch/WebFetch). If it already happened, still give its date and add "(ya pasó)"; if it
+recurs (yearly festival, weekly market), give the next edition's date."""},
     "personal": {"folder": "Personal Instagram", "emoji": "🪞", "notify": False,
                  "about": "reflexiones, frases y cosas personales",
                  "task": """{owner} saved this for personal reasons: a quote, a reflection, something deep or meaningful
@@ -307,17 +312,19 @@ URLs found in the caption: {urls}
 Answer in {language} (keep quotes/lyrics in their original language) as a JSON object with exactly these keys
 (use "" or [] for keys that do not apply): relevant (bool), title (max 8 words), one_liner (max 15 words), url,
 what, fit, steps (list), effort (bajo|medio|alto|""), value (bajo|medio|alto|""), claude, ha, pros (list),
-cons (list), where, when, price, maps, rating, reviews (list), quote, artist, song, tags (one-word list)."""
+cons (list), where, when, kind (event|place|activity|""), price, maps, rating, reviews (list), quote, artist, song,
+tags (one-word list)."""
 
 SCHEMA = {"type": "object",
           "required": ["relevant", "title", "one_liner", "url", "what", "fit", "steps", "effort", "value",
-                       "claude", "ha", "pros", "cons", "where", "when", "price", "maps", "rating", "reviews",
+                       "claude", "ha", "pros", "cons", "where", "when", "kind", "price", "maps", "rating", "reviews",
                        "quote", "artist", "song", "tags"],
           "properties": {k: {"type": "string"} for k in ("title", "one_liner", "url", "what", "fit", "claude", "ha",
                                                          "where", "when", "price", "maps", "rating", "quote", "artist", "song")}
           | {k: {"type": "array", "items": {"type": "string"}} for k in ("pros", "cons", "reviews")}
           | {"relevant": {"type": "boolean"}, "steps": {"type": "array", "items": {"type": "string"}},
              "tags": {"type": "array", "items": {"type": "string"}},
+             "kind": {"type": "string", "enum": ["event", "place", "activity", ""]},
              "effort": {"type": "string", "enum": ["bajo", "medio", "alto", ""]},
              "value": {"type": "string", "enum": ["bajo", "medio", "alto", ""]}}}
 
@@ -367,7 +374,8 @@ def lst(items):
 
 def body_for(mode, d, post_url, pics=()):
     g = lambda k: (d.get(k) or "").strip()
-    head = f"# {d['title']}\n\n> {g('one_liner')}\n\n" + "".join(f"![[{p}|500]]\n" for p in pics) + ("\n" if pics else "")
+    warn = f"> [!warning] Idea incompleta: {d['incomplete']}\n\n" if d.get("incomplete") else ""
+    head = f"# {d['title']}\n\n{warn}> {g('one_liner')}\n\n" + "".join(f"![[{p}|500]]\n" for p in pics) + ("\n" if pics else "")
     if mode == "idea":
         return head + (f"- **Enlace:** {g('url') or '—'}\n- **{'Reel' if 'instagram.com' in post_url else 'Fuente'}:** {post_url}\n"
                        f"- **Esfuerzo:** {g('effort') or '?'} · **Valor:** {g('value') or '?'}\n\n"
@@ -392,6 +400,37 @@ def body_for(mode, d, post_url, pics=()):
         return head + (f"- **Artista:** {g('artist') or '?'}\n- **Canción:** {g('song') or '?'}\n"
                        f"- **Escuchar:** {g('url') or f'https://open.spotify.com/search/{q}'}\n- **Post:** {post_url}\n\n{g('what')}\n")
     return head + f"- **Post:** {post_url}\n"  # private
+
+
+MONTHS = ("ene|feb|mar|abr|may|jun|jul|ago|sep|oct|nov|dic|jan|apr|aug|dec|january|february|march|april|june|july|"
+          "august|september|october|november|december|enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre|octubre|"
+          "noviembre|diciembre")
+
+
+def has_date(text):
+    """True if text holds a concrete date: '29 mayo 2026', '29/05/2026', '2026-05-29', 'May 29'…"""
+    t = (text or "").lower()
+    return bool(re.search(r"(?<!\d)\d{1,2}/\d{1,2}(/\d{2,4})?(?!\d)|\b\d{4}-\d{2}-\d{2}\b", t) or
+                re.search(rf"(?<!\d)\d{{1,2}}(º|°)?\s*(de\s+)?({MONTHS})\b|\b({MONTHS})\.?\s+\d{{1,2}}(?!\d)", t))
+
+
+EVENT_RETRY = ("\n\nIMPORTANT: this is an EVENT and `when` has no concrete date yet. Search the official site and ticketing "
+               "pages and fill `when` with the exact date(s) (day month year, time if known); repeat every other field as before.")
+
+
+def ensure_event_date(d, prompt, workdir, brain):
+    """An event without a date is not a complete idea: ask once more for the date only; flag it if still missing."""
+    if brain == "claude":
+        try:
+            r = ask_claude(prompt + EVENT_RETRY, workdir)
+            if has_date(r.get("when")):
+                d["when"] = r["when"]
+                return d
+        except Exception as e:
+            log("event date retry failed:", type(e).__name__)
+    d["incomplete"] = "falta la fecha del evento"
+    log("event without a date:", d.get("title"))
+    return d
 
 
 def save_pictures(code, imgs, n=4):
@@ -419,7 +458,9 @@ def write_note(mode, collection, d, post_url, brain, when, pics=()):
     tags = ["instagram" if "instagram.com" in post_url else "enlace", mode] + [re.sub(r"\W", "", t.lower()) for t in d.get("tags") or [] if t]
     fm = {"type": mode, "tags": sorted(set(t for t in tags if t)), "created": f"{when:%Y-%m-%d}",
           "updated": f"{when:%Y-%m-%d}", "summary": d.get("one_liner", ""), "collection": collection,
-          "url": d.get("url", ""), "source": post_url, "status": "nueva", "brain": brain}
+          "url": d.get("url", ""), "source": post_url, "status": "incompleta" if d.get("incomplete") else "nueva", "brain": brain}
+    if d.get("incomplete"):
+        fm["missing"] = d["incomplete"]
     if mode == "idea":
         fm |= {"effort": d.get("effort", ""), "value": d.get("value", "")}
     if mode == "plan":
@@ -502,6 +543,8 @@ def process(cl, collection, mode, it, done):
             global _whisper
             _whisper = None  # free VRAM for the LLM
             d, brain = ask_ollama(prompt.replace(hint, "Frames are attached as images.") if hint else prompt, imgs[:4]), "ollama"
+        if mode == "plan" and d.get("kind") == "event" and not has_date(d.get("when")):
+            d = ensure_event_date(d, prompt, tmp, brain)
         done.add(it["pk"])
         if MODES[mode].get("skip_irrelevant") and not d.get("relevant", True):
             log(f"[{collection}] not relevant, skipped: {post_url} | {d.get('one_liner')}")
@@ -611,7 +654,9 @@ def notify_item(mode, d, pk):
         parts += [f"📍 {g('where')}" if g("where") else "", f"⭐ {g('rating')}" if g("rating") else "",
                   f"[Google Maps]({g('maps')})" if g("maps").startswith("https://") else ""]
     parts += [g("url"), f"Nota en Obsidian: {MODES[mode]['folder']}"]
-    notify(f"{MODES[mode]['emoji']} {d['title']}", "\n\n".join(p for p in parts if p), f"insta_{mode}_{pk}")
+    if d.get("incomplete"):
+        parts.insert(0, f"⚠️ Idea incompleta: {d['incomplete']}")
+    notify(f"{'⚠️ ' if d.get('incomplete') else ''}{MODES[mode]['emoji']} {d['title']}", "\n\n".join(p for p in parts if p), f"insta_{mode}_{pk}")
 
 
 if __name__ == "__main__":
