@@ -200,6 +200,21 @@ def from_beeper(st):
                 seen.append(m["id"]); del seen[:-500]; save_state(st)
 
 
+def unsave_backlog():
+    """Once a day, while processed posts are still saved, run one unsave batch (unsave_processed.py) when no scan runs."""
+    mark = os.path.join(ideas.HERE, "unsave_backlog.json")
+    m = json.load(open(mark, encoding="utf-8")) if os.path.exists(mark) else {}
+    if m.get("left") == 0 or m.get("day") == dt.date.today().isoformat() or ideas.scan_running():
+        return
+    if time.time() - LAST_START[0] < 600:  # it takes the scan lock a few seconds after starting
+        return
+    LAST_START[0] = time.time()
+    log("[links] starting today's unsave batch")
+    subprocess.Popen([sys.executable, os.path.join(ideas.HERE, "unsave_processed.py")], cwd=ideas.HERE,
+                     stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                     creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+
+
 def heartbeat(st):
     """sensor.ideas_watcher: when the watcher last ran, so Home Assistant can tell if the PC side is alive."""
     try:
@@ -321,6 +336,10 @@ def main():
             except Exception:
                 log("[links]", src.__name__, "error:", traceback.format_exc().splitlines()[-1])
         heartbeat(st)
+        try:
+            unsave_backlog()
+        except Exception as e:
+            log("[links] unsave backlog error:", type(e).__name__)
         if "--once" in sys.argv:
             return
         for _ in range(max(1, int(CFG.get("interval", 120)) // 10)):  # the scan button is checked every 10 s
