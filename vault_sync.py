@@ -187,22 +187,38 @@ def check_move(st, save):
     targets = names + [n for n, _ in ideas.COLLECTIONS if n not in names]
     if to_sel.json()["attributes"].get("options") != targets:
         ha("POST", "services/input_select/set_options", json={"entity_id": MOVE_TO, "options": targets})
-    pressed = btn.json()["state"]
-    if pressed == st.get("move_seen"):
-        return
-    first = "move_seen" not in st
-    st["move_seen"] = pressed; save(st)
-    if first:
-        return
     chosen, target = idea_sel.json()["state"], to_sel.json()["state"]
     n = next((x for x in notes_ if label(x) == chosen), None)
-    if not n or target == n["collection"]:
-        return
-    set_field(n["path"], "collection", target)
-    n["collection"] = target
-    relocate([n])
-    ideas.notify("📂 Idea movida", f"«{n['title']}»: {viewed} → {target}", "ideas_movida")
-    publish_collections()
+    if pressed_since(btn, "move_seen", st, save) and n and target != n["collection"]:
+        set_field(n["path"], "collection", target)
+        n["collection"] = target
+        relocate([n])
+        ideas.notify("📂 Idea movida", f"«{n['title']}»: {viewed} → {target}", "ideas_movida")
+        publish_collections()
+    dbtn = get(DELETE_BTN)
+    if dbtn.ok and pressed_since(dbtn, "delete_seen", st, save) and n:
+        trash = os.path.join(ideas.VAULT, ".trash")  # Obsidian's own trash: the note can be restored from there
+        os.makedirs(trash, exist_ok=True)
+        dest, i = os.path.join(trash, n["file"]), 2
+        while os.path.exists(dest):
+            dest = os.path.join(trash, f"{n['file'][:-3]} ({i}).md"); i += 1
+        os.replace(n["path"], dest)
+        log(f"[vault] deleted {n['file']} ({viewed}) -> .trash")
+        ideas.notify("🗑️ Idea eliminada", f"«{n['title']}» ({viewed}) está en la papelera de Obsidian (.trash).", "ideas_eliminada")
+        publish_collections()
+
+
+DELETE_BTN = ideas.CFG.get("delete_button", "input_button.eliminar_idea")
+
+
+def pressed_since(btn, key, st, save):
+    """True once per new press of an HA input_button (its state is the last press time); the first look only remembers."""
+    pressed = btn.json()["state"]
+    if pressed == st.get(key):
+        return False
+    first = key not in st
+    st[key] = pressed; save(st)
+    return not first
 
 
 def publish_pending():
