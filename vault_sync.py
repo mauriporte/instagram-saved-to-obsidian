@@ -115,22 +115,108 @@ def col_slug(name):
     return re.sub(r"[^a-z0-9]+", "_", ideas.norm(name)).strip("_")
 
 
+MOVE_IDEA = ideas.CFG.get("move_idea_entity", "input_select.ideas_mover_idea")
+MOVE_TO = ideas.CFG.get("move_to_entity", "input_select.ideas_mover_destino")
+MOVE_BTN = ideas.CFG.get("move_button", "input_button.ideas_mover")
+LINKS_COLLECTION = ideas.CFG.get("links", {}).get("collection", "Work")
+
+
+def mode_of(collection):
+    """Folder/mode a collection's notes belong in: its configured mode; links (and unknown names) are ideas."""
+    return next((m for n, m in ideas.COLLECTIONS if ideas.norm(n) == ideas.norm(collection)), "idea")
+
+
+def all_notes():
+    """Every Insta-Ideas note in every mode folder, with its frontmatter."""
+    out = []
+    for mode, m in ideas.MODES.items():
+        d = os.path.join(ideas.BASE, m["folder"])
+        for f in sorted(os.listdir(d)) if os.path.isdir(d) else []:
+            if f.endswith(".md"):
+                fm, title, _ = frontmatter(os.path.join(d, f))
+                if fm.get("collection"):
+                    out.append({"file": f, "path": os.path.join(d, f), "title": title, "mode": mode, **fm})
+    return out
+
+
+def set_field(path, key, value):
+    t = open(path, encoding="utf-8").read()
+    t = re.sub(rf"^{key}: .*$", f"{key}: {json.dumps(value, ensure_ascii=False)}", t, count=1, flags=re.M)
+    open(path, "w", encoding="utf-8").write(t)
+
+
+def relocate(notes_):
+    """A note whose `collection` was changed (in Obsidian or by the HA mover) goes to that collection's folder."""
+    moved = 0
+    for n in notes_:
+        mode = mode_of(n["collection"])
+        if mode == n["mode"]:
+            continue
+        dest_dir = os.path.join(ideas.BASE, ideas.MODES[mode]["folder"])
+        os.makedirs(dest_dir, exist_ok=True)
+        dest, i = os.path.join(dest_dir, n["file"]), 2
+        while os.path.exists(dest):  # never overwrite a note with the same name
+            dest = os.path.join(dest_dir, f"{n['file'][:-3]} ({i}).md"); i += 1
+        set_field(n["path"], "type", mode)
+        os.replace(n["path"], dest)
+        log(f"[vault] moved {n['file']} -> {ideas.MODES[mode]['folder']} ({n['collection']})")
+        moved += 1
+    return moved
+
+
+def label(n):
+    return f"{n['title']} · {n.get('created', '')}"[:250]  # name first: the dropdown is narrow
+
+
+def check_move(st, save):
+    """HA mover (called every ~10 s by links.py): keeps «Idea a mover» listing the viewed collection, and on the Mover
+    button sets the chosen note's collection to «Mover a» and moves it."""
+    if not ideas.HA:
+        return
+    get = lambda e: ha("GET", f"states/{e}")
+    view, idea_sel, to_sel, btn = (get(e) for e in (VIEW_SELECT, MOVE_IDEA, MOVE_TO, MOVE_BTN))
+    if not all(r.ok for r in (view, idea_sel, to_sel, btn)):
+        return
+    viewed = view.json()["state"]
+    notes_ = [n for n in all_notes() if n["collection"] == viewed]
+    notes_.sort(key=lambda n: (n.get("created", ""), n["file"]), reverse=True)
+    labels = [label(n) for n in notes_] or ["(sin notas)"]
+    if idea_sel.json()["attributes"].get("options") != labels:
+        ha("POST", "services/input_select/set_options", json={"entity_id": MOVE_IDEA, "options": labels})
+    names = view.json()["attributes"].get("options") or []
+    targets = names + [n for n, _ in ideas.COLLECTIONS if n not in names]
+    if to_sel.json()["attributes"].get("options") != targets:
+        ha("POST", "services/input_select/set_options", json={"entity_id": MOVE_TO, "options": targets})
+    pressed = btn.json()["state"]
+    if pressed == st.get("move_seen"):
+        return
+    first = "move_seen" not in st
+    st["move_seen"] = pressed; save(st)
+    if first:
+        return
+    chosen, target = idea_sel.json()["state"], to_sel.json()["state"]
+    n = next((x for x in notes_ if label(x) == chosen), None)
+    if not n or target == n["collection"]:
+        return
+    set_field(n["path"], "collection", target)
+    n["collection"] = target
+    relocate([n])
+    ideas.notify("📂 Idea movida", f"«{n['title']}»: {viewed} → {target}", "ideas_movida")
+    publish_collections()
+
+
 def publish_collections():
     """sensor.ideas_coleccion_<slug>: every recognised note of one collection (all modes), newest first, for the
     «Por colección» viewer in Home Assistant; keeps the viewer's selector options in step with the collections."""
     if not ideas.HA:
         return
+    relocate(all_notes())  # collection edited in Obsidian: the file goes to that collection's folder first
     groups = {}
-    for mode, m in ideas.MODES.items():
-        d = os.path.join(ideas.BASE, m["folder"])
-        rel = os.path.relpath(d, ideas.VAULT).replace(os.sep, "/")
-        for f in sorted(os.listdir(d)) if os.path.isdir(d) else []:
-            if f.endswith(".md"):
-                fm, title, _ = frontmatter(os.path.join(d, f))
-                if fm.get("collection"):
-                    groups.setdefault(fm["collection"], []).append({
-                        "t": title, "s": (fm.get("summary") or "")[:110], "d": fm.get("created", ""),
-                        "st": fm.get("status", ""), "p": f"{rel}/{f}"})
+    for n in all_notes():
+        rel = os.path.relpath(os.path.dirname(n["path"]), ideas.VAULT).replace(os.sep, "/")
+        groups.setdefault(n["collection"], []).append({
+            "t": n["title"], "s": (n.get("summary") or "")[:110], "d": n.get("created", ""),
+            "st": n.get("status", ""), "p": f"{rel}/{n['file']}"})
     order = [n for n, _ in ideas.COLLECTIONS] + sorted(set(groups) - {n for n, _ in ideas.COLLECTIONS})
     names = [n for n in order if n in groups]
     for name in names:
@@ -138,6 +224,10 @@ def publish_collections():
         ha("POST", f"states/sensor.ideas_coleccion_{col_slug(name)}", json={"state": len(items), "attributes": {
             "friendly_name": f"Ideas: {name}", "icon": "mdi:folder-multiple-image", "unit_of_measurement": "notas",
             "collection": name, "items": items}})
+    live = {f"sensor.ideas_coleccion_{col_slug(n)}" for n in names}
+    for e in [x["entity_id"] for x in ha("GET", "states").json() if x["entity_id"].startswith("sensor.ideas_coleccion_")]:
+        if e not in live:  # a collection that was emptied (its notes moved elsewhere)
+            ha("DELETE", f"states/{e}")
     sel = ha("GET", f"states/{VIEW_SELECT}")
     if sel.ok and sel.json()["attributes"].get("options") != names and names:
         ha("POST", "services/input_select/set_options", json={"entity_id": VIEW_SELECT, "options": names})
@@ -197,8 +287,72 @@ Volver a [[Home]]
 """
 
 
+HOME_INFO = ideas.CFG.get("home_info")  # {"folder": "20-dashboards/Home Info", "note": "20-dashboards/Home Info.md"}
+
+
+def home_info():
+    """Home Info history: the newest report stays in `folder`, older ones go to `folder`/Historial. The note shows
+    every report of the newest day (newest on top, PDF linked) and lists earlier days; each earlier day gets its own
+    note in Historial with all that day's reports, newest on top. Newest = last written."""
+    if not HOME_INFO:
+        return
+    d = os.path.join(ideas.VAULT, HOME_INFO["folder"]); hist = os.path.join(d, "Historial")
+    found = [os.path.join(x, f) for x in (d, hist) if os.path.isdir(x) for f in os.listdir(x)
+             if f.startswith("home-info-") and f.endswith(".html")]
+    if not found:
+        return
+    found.sort(key=os.path.getmtime, reverse=True)
+    stem = lambda p: os.path.splitext(os.path.basename(p))[0]
+    newest = stem(found[0])
+    os.makedirs(hist, exist_ok=True)
+    for f in os.listdir(d):  # everything that isn't the newest report moves to the history
+        if f.startswith("home-info-") and os.path.splitext(f)[0] != newest and os.path.isfile(os.path.join(d, f)):
+            os.replace(os.path.join(d, f), os.path.join(hist, f))
+            log(f"[vault] Home Info: {f} -> Historial")
+    if os.path.isfile(os.path.join(hist, newest + ".html")):  # the newest came back from the history
+        for ext in (".html", ".pdf"):
+            if os.path.isfile(os.path.join(hist, newest + ext)):
+                os.replace(os.path.join(hist, newest + ext), os.path.join(d, newest + ext))
+    folder = lambda s: d if s == newest else hist
+    pdf = lambda s: f" · [[{s}.pdf|PDF]]" if os.path.isfile(os.path.join(folder(s), s + ".pdf")) else ""
+    name = lambda s: s.removeprefix("home-info-")  # "2026-10-18" or "2026-10-18-tarde"
+    by_day = {}  # day -> its reports, newest first (found is newest first)
+    for p in found:
+        by_day.setdefault(name(stem(p))[:10], []).append(stem(p))
+
+    def page(day):
+        """Every report of one day in one view, newest on top."""
+        if len(by_day[day]) == 1:
+            parts = [f"## {name(s)}{pdf(s)}\n\n![[{s}.html]]\n" for s in by_day[day]]
+        else:  # several the same day: each one folds, the newest open (Notes Vault patch 08)
+            parts = [f"PDF: [[{s}.pdf|{name(s)}]]\n" * bool(pdf(s)) + f"![[{s}.html|{'abierto' if i == 0 else 'plegado'}: {name(s)}]]\n"
+                     for i, s in enumerate(by_day[day])]
+        return f'---\ntype: report\nupdated: "{day}"\n---\n' + "\n".join(parts)  # the panel already shows the note name
+
+    def write(path, text):
+        if not os.path.exists(path) or open(path, encoding="utf-8").read() != text:
+            open(path, "w", encoding="utf-8").write(text)
+            log(f"[vault] Home Info: {os.path.relpath(path, ideas.VAULT)} updated")
+
+    # the main note: the newest day; Historial: one note per earlier day ("2026-10-18 - Home Info")
+    days = list(by_day)
+    pages = {f"{day} - Home Info.md": day for day in days[1:]}
+    for f in os.listdir(hist):
+        if re.match(r"\d{4}-\d{2}-\d{2} (- )?Home Info.*\.md$", f) and f not in pages:
+            os.remove(os.path.join(hist, f))  # a day that is now the newest, or whose reports were removed
+    for f, day in pages.items():
+        write(os.path.join(hist, f), page(day))
+    rows = "\n".join(f"- [[{f[:-3]}|{day}]] ({len(by_day[day])})" for f, day in pages.items())
+    write(os.path.join(ideas.VAULT, HOME_INFO["note"]),
+          page(days[0]) + f"\n## Historial\n{rows or '_Todavía no hay días anteriores._'}\n")
+
+
 def run():
     st = {}
+    try:
+        home_info()
+    except Exception as e:
+        log("[vault] Home Info error:", type(e).__name__, e)
     try:
         st = json.load(open(STATE, encoding="utf-8"))
     except (OSError, ValueError):

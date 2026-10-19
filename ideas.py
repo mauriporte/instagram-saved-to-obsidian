@@ -8,7 +8,7 @@
 # Every run: all NEW saves (since the first run) + up to `backlog_per_run` older items, in collection priority order.
 # Brain: Claude Code headless (your subscription); if it fails (e.g. out of usage) -> local Ollama.
 # Everything personal lives in config.json (see config.example.json). Run: python ideas.py [--backlog N] [--only NAME] [--newest-first | --oldest-first] [--continuous] [--dry-run]
-import base64, datetime as dt, json, os, re, shutil, subprocess, sys, tempfile, traceback, unicodedata, urllib.parse
+import base64, datetime as dt, json, os, random, re, shutil, subprocess, sys, tempfile, time, traceback, unicodedata, urllib.parse
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 SESSION = os.path.join(HERE, "session.json")
@@ -21,6 +21,7 @@ CFG = json.load(open(CFG_PATH, encoding="utf-8"))
 arg = lambda k, d: sys.argv[sys.argv.index(k) + 1] if k in sys.argv else d
 BACKLOG = int(arg("--backlog", CFG.get("backlog_per_run", 15)))  # older items per run, all collections together
 MAX_NEW = int(CFG.get("max_new_per_run", 25))                    # safety cap for new saves per run
+LIMIT = int(arg("--limit", 0)) or None                           # --limit N: at most N posts this run (tests)
 ONLY = arg("--only", None)
 DRY = "--dry-run" in sys.argv
 MAX_TRIES = 3  # a post whose download/analysis fails this many times is set aside (state.json "failed")
@@ -78,9 +79,16 @@ paraphrasing; open the images with the Read tool to read them), plus the author 
 what = the core message in 1-3 sentences, fit = in one or two sentences why it may resonate (gentle, no therapy talk)."""},
     "music": {"folder": "Música Instagram", "emoji": "🎵", "notify": False,
               "about": "canciones y artistas guardados",
-              "task": """{owner} saved this for the MUSIC. Identify the song and artist (caption, on-screen text,
-lyrics in the transcript; you may WebSearch lyrics). Fill: artist, song, what (genre/vibe in one sentence), url
-(official link if found, else empty)."""},
+              "task": """{owner} saved this for the MUSIC. Identify the song being played/referenced and the artist
+(caption, on-screen text, lyrics in the transcript; WebSearch lyrics or the track if needed). Fill: artist, song,
+what (genre/vibe in one sentence). url = a direct link to that track you actually found: Spotify
+(https://open.spotify.com/track/...) first; if it is not on Spotify, Bandcamp or Mixcloud (a DJ set/mix); "" if none.
+artist_url = the artist's page: Spotify artist page (https://open.spotify.com/artist/...), else AllMusic; "".
+tour = upcoming concerts/festival dates in EUROPE you can confirm on the artist's site, Songkick, Bandsintown or a
+ticketing site, one item each as "date (day month year) — city, country — venue — ticket/info URL"; [] if none found;
+never invent dates. If the post is itself about a specific EVENT (a concert, festival, club night): kind = "event",
+where = venue + full address, when = exact date(s) with year, maps = a Google Maps link for the venue
+(https://www.google.com/maps/search/?api=1&query=<venue and address, URL-encoded>); otherwise leave those empty."""},
     "private": {"folder": "Privado Instagram", "emoji": "🔒", "notify": False,
                 "about": "colección privada",
                 "task": """This comes from a private collection. Write ONLY a short, neutral, non-explicit description
@@ -204,10 +212,32 @@ def notify(title, message, nid):
 
 
 # ---------- Instagram (read-only) ----------
+def ha_on(key):
+    """True if the HA input_boolean named by config key `key` is on; off if missing, unreadable or a dry run."""
+    ent = CFG.get(key)
+    if DRY or not (HA and ent):
+        return False
+    try:
+        return requests.get(f"{HA}/api/states/{ent}", headers={"Authorization": "Bearer " + ha_token()}, timeout=20).json()["state"] == "on"
+    except Exception as e:
+        log(f"{ent} unreadable ({type(e).__name__}), taking it as off")
+        return False
+
+
+AMIGABLE = None  # «Amigable»: same work, but one request at a time with long human pauses
+
+
+def amigable():
+    global AMIGABLE
+    if AMIGABLE is None:
+        AMIGABLE = ha_on("friendly_switch")
+    return AMIGABLE
+
+
 def client():
     from instagrapi import Client
     cl = Client()
-    cl.delay_range = [3, 8]  # human-like pauses between requests
+    cl.delay_range = [10, 20] if amigable() else [3, 8]  # pause before every Instagram request
     cl.load_settings(SESSION)  # saved session only; never logs in with a password
     return cl
 
@@ -228,7 +258,8 @@ def sync(cl, state):
                 continue
             c = state["collections"].setdefault(name, {"items": [], "baseline": None})
             known = {i["pk"] for i in c["items"]}
-            medias = cl.collection_medias(pk, amount=0 if (week or not c["items"]) else 21)
+            full = (week and not amigable()) or not c["items"]  # Amigable: no weekly full re-read, newest page only
+            medias = cl.collection_medias(pk, amount=0 if full else 21)
             fresh = [item(m) for m in medias if str(m.pk) not in known]
             c["items"] = fresh + c["items"]  # newest first
             if c["baseline"] is None:  # first run: everything that exists now is backlog
@@ -318,10 +349,11 @@ tags (one-word list)."""
 SCHEMA = {"type": "object",
           "required": ["relevant", "title", "one_liner", "url", "what", "fit", "steps", "effort", "value",
                        "claude", "ha", "pros", "cons", "where", "when", "kind", "price", "maps", "rating", "reviews",
-                       "quote", "artist", "song", "tags"],
+                       "quote", "artist", "song", "artist_url", "tour", "tags"],
           "properties": {k: {"type": "string"} for k in ("title", "one_liner", "url", "what", "fit", "claude", "ha",
-                                                         "where", "when", "price", "maps", "rating", "quote", "artist", "song")}
-          | {k: {"type": "array", "items": {"type": "string"}} for k in ("pros", "cons", "reviews")}
+                                                         "where", "when", "price", "maps", "rating", "quote", "artist", "song",
+                                                         "artist_url")}
+          | {k: {"type": "array", "items": {"type": "string"}} for k in ("pros", "cons", "reviews", "tour")}
           | {"relevant": {"type": "boolean"}, "steps": {"type": "array", "items": {"type": "string"}},
              "tags": {"type": "array", "items": {"type": "string"}},
              "kind": {"type": "string", "enum": ["event", "place", "activity", ""]},
@@ -397,8 +429,16 @@ def body_for(mode, d, post_url, pics=()):
         return head + (f"## Texto\n{quote}\n\n" if quote else "") + f"## Mensaje\n{g('what')}\n\n## Por qué resuena\n{g('fit')}\n\n- **Post:** {post_url}\n"
     if mode == "music":
         q = urllib.parse.quote(f"{g('artist')} {g('song')}".strip())
-        return head + (f"- **Artista:** {g('artist') or '?'}\n- **Canción:** {g('song') or '?'}\n"
-                       f"- **Escuchar:** {g('url') or f'https://open.spotify.com/search/{q}'}\n- **Post:** {post_url}\n\n{g('what')}\n")
+        artist = f"[{g('artist') or '?'}]({g('artist_url')})" if g("artist_url").startswith("https://") else (g("artist") or "?")
+        event = ""
+        if d.get("kind") == "event":
+            maps = g("maps") if g("maps").startswith("https://") else ""
+            event = (f"\n## Evento\n- **Dónde:** {g('where') or '—'}" + (f" · [Google Maps]({maps})" if maps else "") +
+                     f"\n- **Cuándo:** {g('when') or '—'}\n")
+        tour = lst(d.get("tour")) or "_No se encontraron fechas próximas en Europa._"
+        return head + (f"- **Artista:** {artist}\n- **Canción:** {g('song') or '?'}\n"
+                       f"- **Escuchar:** {g('url') or f'https://open.spotify.com/search/{q}'}\n- **Post:** {post_url}\n\n{g('what')}\n"
+                       f"{event}\n## Próximos conciertos en Europa\n{tour}\n")
     return head + f"- **Post:** {post_url}\n"  # private
 
 
@@ -543,7 +583,7 @@ def process(cl, collection, mode, it, done):
             global _whisper
             _whisper = None  # free VRAM for the LLM
             d, brain = ask_ollama(prompt.replace(hint, "Frames are attached as images.") if hint else prompt, imgs[:4]), "ollama"
-        if mode == "plan" and d.get("kind") == "event" and not has_date(d.get("when")):
+        if mode in ("plan", "music") and d.get("kind") == "event" and not has_date(d.get("when")):
             d = ensure_event_date(d, prompt, tmp, brain)
         done.add(it["pk"])
         if MODES[mode].get("skip_irrelevant") and not d.get("relevant", True):
@@ -563,6 +603,27 @@ def process(cl, collection, mode, it, done):
         return None
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
+
+
+
+def unsave_on():
+    """HA switch "unsave_switch" («Quitar de guardados»); off (keep saved) if it is missing or unreadable."""
+    return ha_on("unsave_switch")
+
+
+def unsave(cl, it):
+    """Removes the post from Instagram's saved posts entirely (every collection and «All saved posts»)."""
+    time.sleep(random.uniform(4, 10))  # gentle pace: write actions are what Instagram watches for automation
+    try:
+        cl.media_unsave(cl.media_id(it["pk"]))
+        log(f"unsaved from Instagram: {it['code']}")
+        return True
+    except Exception as e:
+        if type(e).__name__ in ("LoginRequired", "ChallengeRequired"):
+            notify("⚠️ Instagram guardados", "La sesión de Instagram ha caducado. Hay que renovarla (pídeselo a Claude).", "insta_ideas_session")
+            raise SystemExit("session expired")
+        log(f"unsave FAILED {it['code']}: {type(e).__name__}")  # stays saved; the note is already written
+        return False
 
 
 # ---------- main ----------
@@ -612,17 +673,26 @@ def scan():
             if it["pk"] in done or failed.get(it["pk"], 0) >= MAX_TRIES:  # set aside after repeated failures
                 continue
             (queue_old if it["pk"] in base else queue_new).append((name, mode, it))
-    queue = queue_new[:MAX_NEW] + queue_old[:BACKLOG]
+    queue = (queue_new[:MAX_NEW] + queue_old[:BACKLOG])[:LIMIT]
+    if amigable():
+        log("Amigable: one request at a time with long pauses")
     log(f"queue ({'newest' if newest_first else 'oldest'} first): {len(queue_new)} new, {len(queue_old)} backlog -> processing {len(queue)}")
     results = []
     for name, mode in dict.fromkeys((n, m) for n, m, _ in queue):
         ensure_index(mode)
     ok = 0
+    unsave_ = unsave_on()
+    if unsave_:
+        log("unsave: on - posts with a complete note are removed from Instagram's saved posts")
     for n, (name, mode, it) in enumerate(queue):
+        if n and amigable():
+            time.sleep(random.uniform(10, 20))  # one post at a time, with a human-sized break between them
         progress(f"{round(100 * n / len(queue))} % ({n}/{len(queue)})", n, len(queue))
         d = process(cl, name, mode, it, done)
         if not d and it["pk"] not in done:  # failed (not just "not relevant"): count it
             failed[it["pk"]] = failed.get(it["pk"], 0) + 1
+        if unsave_ and d and not d.get("incomplete") and unsave(cl, it):  # only once the note is complete
+            state.setdefault("unsaved", []).append(it["pk"])
         save()
         ok += it["pk"] in done  # handled, including "not relevant" skips (only failures don't count)
         if d and MODES[mode]["notify"]:
