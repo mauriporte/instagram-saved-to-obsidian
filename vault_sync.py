@@ -226,7 +226,7 @@ def publish_pending():
     if sel is not None and sel.ok:
         opts = sel.json()["attributes"]["options"]
         base = lambda o: re.sub(r" · \d+$", "", o)
-        new = [f"{base(opts[0])} · {sum(r['p'] for r in rows)}"] + [f"{r['c']} · {r['p']}" for r in rows]
+        new = ["Todas"] + [f"{r['c']} · {r['p']}" for r in rows]  # 1st option = all collections (the scan only checks its position)
         if opts != new:
             current = base(sel.json()["state"])
             ha("POST", "services/input_select/set_options", json={"entity_id": ent, "options": new})
