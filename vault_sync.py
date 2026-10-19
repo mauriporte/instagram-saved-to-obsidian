@@ -110,6 +110,38 @@ def sync_todo(items_notes, st):
     st["synced"] = sorted(synced)
 
 
+CHECK = re.compile(r"^- \[( |x|X)\] Completada\s*$", re.M)
+
+
+def sync_checkboxes(st):
+    """Every note has a «- [ ] Completada» checkbox (Notes and Obsidian). Ticking or unticking it sets the note's status
+    ("hecha" / back to "nueva"); a status changed elsewhere (e.g. ticked in the Ideas list) ticks or unticks the box.
+    Notes without the box get it, ticked if already "hecha". st["checked"] remembers the last box state per note."""
+    checked = set(st.get("checked", []))
+    first = "checked" not in st
+    for n in all_notes():
+        t = open(n["path"], encoding="utf-8").read()
+        m = CHECK.search(t)
+        done = n.get("status") == "hecha"
+        if not m:  # older note: add the box under the title
+            box = "- [x] Completada" if done else "- [ ] Completada"
+            t2 = re.sub(r"^(# .+\n)", lambda h: h.group(1) + "\n" + box + "\n", t, count=1, flags=re.M)
+            if t2 != t:
+                open(n["path"], "w", encoding="utf-8").write(t2)
+            (checked.add if done else checked.discard)(n["file"])
+            continue
+        box = m.group(1).lower() == "x"
+        if not first and box != (n["file"] in checked):  # the user ticked/unticked it
+            if box != done:
+                set_status(n["path"], "hecha" if box else "nueva")
+        elif box != done:  # status changed elsewhere: the box follows
+            t = t[:m.start()] + ("- [x] Completada" if done else "- [ ] Completada") + t[m.end():]
+            open(n["path"], "w", encoding="utf-8").write(t)
+            box = done
+        (checked.add if box else checked.discard)(n["file"])
+    st["checked"] = sorted(checked)
+
+
 def publish_sensor(st):
     """Counters for the Ideas dashboard, over every Insta-Ideas note (all collections):
     sensor.ideas_nuevas = still open and not reviewed yet («Vaciar lista» marks everything processed so far as reviewed),
@@ -221,11 +253,6 @@ def check_move(st, save):
         relocate([n])
         ideas.notify("📂 Idea movida", f"«{n['title']}»: {viewed} → {target}", "ideas_movida")
         publish_collections()
-    cbtn = get(COMPLETE_BTN)
-    if cbtn.ok and pressed_since(cbtn, "complete_seen", st, save) and n and n.get("status") != "hecha":
-        set_status(n["path"], "hecha")  # the Ideas list ticks it on the next sync
-        ideas.notify("✅ Idea completada", f"«{n['title']}» ({viewed}) marcada como completada.", "ideas_completada")
-        publish_collections()
     dbtn = get(DELETE_BTN)
     if dbtn.ok and pressed_since(dbtn, "delete_seen", st, save) and n:
         trash = os.path.join(ideas.VAULT, ".trash")  # Obsidian's own trash: the note can be restored from there
@@ -240,7 +267,6 @@ def check_move(st, save):
 
 
 DELETE_BTN = ideas.CFG.get("delete_button", "input_button.eliminar_idea")
-COMPLETE_BTN = ideas.CFG.get("complete_button", "input_button.completar_idea")
 
 
 def pressed_since(btn, key, st, save):
@@ -555,6 +581,7 @@ def run():
         log("[vault] todo sync error:", type(e).__name__, e)
     ns = notes()  # statuses may have changed
     try:
+        sync_checkboxes(st)
         publish_sensor(st)
     except Exception as e:
         log("[vault] sensor error:", type(e).__name__, e)

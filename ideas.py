@@ -540,7 +540,7 @@ def lst(items):
 def body_for(mode, d, post_url, pics=()):
     g = lambda k: (d.get(k) or "").strip()
     warn = f"> [!warning] Idea incompleta: {d['incomplete']}\n\n" if d.get("incomplete") else ""
-    head = f"# {d['title']}\n\n{warn}> {g('one_liner')}\n\n" + "".join(f"![[{p}|500]]\n" for p in pics) + ("\n" if pics else "")
+    head = f"# {d['title']}\n\n- [ ] Completada\n\n{warn}> {g('one_liner')}\n\n"  # ticking it marks the idea complete (vault_sync) + "".join(f"![[{p}|500]]\n" for p in pics) + ("\n" if pics else "")
     if mode == "idea":
         return head + (f"- **Enlace:** {g('url') or '—'}\n- **{'Reel' if 'instagram.com' in post_url else 'Fuente'}:** {post_url}\n"
                        f"- **Esfuerzo:** {g('effort') or '?'} · **Valor:** {g('value') or '?'}\n\n"
