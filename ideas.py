@@ -111,6 +111,12 @@ attend in person) or "mixto" (both), "" if unknown; price (free, price or "?"); 
 for presencial or mixto also where (venue + full address) and maps (a Google Maps link for the venue:
 https://www.google.com/maps/search/?api=1&query=<venue and address, URL-encoded>); steps = what you would learn, as a short
 list of topics. Only links you actually found; never invent them."""},
+    "general": {"folder": "Otras Instagram", "emoji": "📌", "notify": False,
+                "about": "otras colecciones",
+                "task": """{owner} saved this in the collection «{collection}». Fill: what = a short description of what
+the post shows or says and why it may be worth keeping (2-3 sentences); steps = its key points as a short list (the
+things to remember, do or look at); url = the main link it refers to if there is one you can confirm, else "";
+quote = the text of the post if it is short (under about 80 words), else ""."""},
     "home": {"folder": "Home Instagram", "emoji": "🏠", "notify": False,
              "about": "trucos y cosas que hacer en casa",
              "task": """{owner} saved this as a HOME TIP: something practical to do at home, nothing digital (cleaning,
@@ -570,6 +576,10 @@ def body_for(mode, d, post_url, pics=()):
                 (f"- **Dónde:** {g('where')}" + (f" · [Google Maps]({maps})" if maps else "")) * bool(g("where")),
                 f"- **Post:** {post_url}"]
         return head + "\n".join(r for r in rows if r) + f"\n\n## Qué es\n{g('what')}\n\n## Qué aprenderías\n{lst(d.get('steps')) or '—'}\n"
+    if mode == "general":
+        text = "\n".join("> " + l if l.strip() else ">" for l in g("quote").splitlines()) if g("quote") else ""
+        return head + (f"{g('what')}\n\n## Puntos clave\n{lst(d.get('steps')) or '—'}\n\n" + (f"## Texto\n{text}\n\n" if text else "")
+                       + (f"- **Enlace:** {g('url')}\n" if g("url") else "") + f"- **Post:** {post_url}\n")
     if mode == "home":
         text = "\n".join("> " + l if l.strip() else ">" for l in g("quote").splitlines()) if g("quote") else ""
         return head + (f"{g('what')}\n\n## Cómo\n{lst(d.get('steps')) or '—'}\n\n" + (f"## Texto\n{text}\n\n" if text else "") +

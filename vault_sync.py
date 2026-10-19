@@ -261,38 +261,98 @@ def publish_pending():
                 "friendly_name": name, "icon": "mdi:folder-off-outline", "unit_of_measurement": "guardados · no se procesa",
                 "collection": name, "processed": False}})
     names = sorted({r["c"] for r in rows} | {n for n in ig if ideas.norm(n) not in configured}, key=ideas.norm)
-    sync_pending_card(names, {ideas.norm(r["c"]) for r in rows})
+    by = {ideas.norm(r["c"]): r for r in rows}
+    labels = {}
+    for n in names:
+        r = by.get(ideas.norm(n))
+        total = ig.get(n, r["t"] if r else 0)
+        labels[n] = f"{n} · {r['p']} de {total}" if r else f"{n} · {ig.get(n, 0)} guardados"
+    sync_switches(names, labels, set(by))
 
 
 PENDING_CARD = "Pendientes por colección"
 
 
-def sync_pending_card(names, processed):
-    """Keep the dashboard list «Pendientes por colección» = every collection, alphabetical (rebuilt when the set changes).
-    Processed collections select themselves in «Ver colección» when tapped; the others are just counts."""
-    dash = ideas.CFG.get("ideas_dashboard", "dashboard-ideas")
-    key = "|".join(names)
-    if getattr(sync_pending_card, "last", None) == key:
-        return
-    import websocket  # websocket-client: dashboards are only editable over Home Assistant's WebSocket API
+def ws_session():
+    """An authenticated Home Assistant WebSocket (helpers and dashboards are only editable there)."""
+    import websocket  # websocket-client
     ws = websocket.create_connection(ideas.HA.replace("http", "ws", 1) + "/api/websocket", timeout=20)
+    ws.recv(); ws.send(json.dumps({"type": "auth", "access_token": ideas.ha_token()})); ws.recv()
+    n = [0]
+
+    def call(msg):
+        n[0] += 1
+        ws.send(json.dumps({"id": n[0], **msg}))
+        while True:
+            r = json.loads(ws.recv())
+            if r.get("id") == n[0]:
+                return r
+    return ws, call
+
+
+def set_processing(name, on):
+    """Turn processing of an Instagram collection on/off in config.json; its type is remembered while it is off
+    (a collection that never had one gets "general"). Scans read the config fresh; this process updates in place."""
+    p = os.path.join(ideas.HERE, "config.json")
+    c = json.load(open(p, encoding="utf-8"))
+    modes = c.setdefault("collection_modes", {})
+    cols = c["collections"]
+    current = next((x for x in cols if ideas.norm(x[0]) == ideas.norm(name)), None)
+    if on and not current:
+        cols.append([name, modes.get(name, "general")])
+    elif not on and current:
+        modes[current[0]] = current[1]; cols.remove(current)
+    else:
+        return
+    json.dump(c, open(p, "w", encoding="utf-8"), ensure_ascii=False, indent=2)
+    ideas.COLLECTIONS[:] = [tuple(x) for x in cols]
+    log(f"[vault] processing {'ON' if on else 'OFF'}: {name}")
+    kind = modes.get(name, "general") if on else current[1]
+    ideas.notify("📂 Colecciones", f"«{name}» {'se procesará' if on else 'ya no se procesa'} (tipo {kind}).", "insta_proc_toggle")
+
+
+def sync_switches(names, labels, processed):
+    """«Pendientes por colección»: one on/off switch per Instagram collection (input_boolean.insta_proc_<slug>), named
+    with its counts. A switch the user flips turns processing on/off in config.json; new collections get a switch set to
+    their current state, and the dashboard list is rebuilt (alphabetical) when the set of collections changes."""
+    ent = lambda n: f"input_boolean.insta_proc_{col_slug(n)}"
+    ws, call = ws_session()
     try:
-        ws.recv(); ws.send(json.dumps({"type": "auth", "access_token": ideas.ha_token()})); ws.recv()
-        ws.send(json.dumps({"id": 1, "type": "lovelace/config", "url_path": dash}))
-        cfg = json.loads(ws.recv())["result"]
+        helpers = {h["id"]: h for h in call({"type": "input_boolean/list"})["result"]}
+        for n in names:
+            hid = ent(n).split(".", 1)[1]
+            want = ideas.norm(n) in processed
+            if hid not in helpers:  # created with the id as its name (HA derives the id from the name), then renamed
+                call({"type": "input_boolean/create", "name": hid, "icon": "mdi:folder-sync-outline", "initial": want})
+                call({"type": "input_boolean/update", "input_boolean_id": hid, "name": labels[n], "icon": "mdi:folder-sync-outline",
+                      "initial": want})
+                ha("POST", f"services/input_boolean/turn_{'on' if want else 'off'}", json={"entity_id": ent(n)})
+                continue
+            if helpers[hid].get("name") != labels[n]:
+                call({"type": "input_boolean/update", "input_boolean_id": hid, "name": labels[n], "icon": "mdi:folder-sync-outline"})
+            s = ha("GET", f"states/{ent(n)}")
+            if s.ok and s.json()["state"] in ("on", "off") and (s.json()["state"] == "on") != want:
+                if getattr(sync_switches, "ready", False):
+                    set_processing(n, s.json()["state"] == "on")  # the user flipped it
+                else:  # first cycle after a start: the config is the truth, the switch follows it
+                    ha("POST", f"services/input_boolean/turn_{'on' if want else 'off'}", json={"entity_id": ent(n)})
+        sync_switches.ready = True
+        dash = ideas.CFG.get("ideas_dashboard", "dashboard-ideas")
+        key = "|".join(names)
+        if getattr(sync_switches, "last", None) == key:
+            return
+        cfg = call({"type": "lovelace/config", "url_path": dash})["result"]
         card = next((c for v in cfg["views"] for s in v.get("sections", []) for c in s.get("cards", [])
                      if c.get("type") == "entities" and c.get("title") == PENDING_CARD), None)
         if card is None:
             return
-        rows = [{"entity": f"sensor.insta_ideas_pendientes_{col_slug(n)}", "name": n} | (
-                    {"tap_action": {"action": "perform-action", "perform_action": "input_select.select_option",
-                                    "target": {"entity_id": VIEW_SELECT}, "data": {"option": n}}}
-                    if ideas.norm(n) in processed else {"tap_action": {"action": "none"}}) for n in names]
+        rows = [{"entity": ent(n), "tap_action": {"action": "perform-action", "perform_action": "input_select.select_option",
+                 "target": {"entity_id": VIEW_SELECT}, "data": {"option": n}}} for n in names]
         if card.get("entities") != rows:
             card["entities"] = rows
-            ws.send(json.dumps({"id": 2, "type": "lovelace/config/save", "url_path": dash, "config": cfg}))
-            log(f"[vault] {PENDING_CARD}: {len(rows)} collections", json.loads(ws.recv()).get("success"))
-        sync_pending_card.last = key
+            log(f"[vault] {PENDING_CARD}: {len(rows)} collections",
+                call({"type": "lovelace/config/save", "url_path": dash, "config": cfg}).get("success"))
+        sync_switches.last = key
     finally:
         ws.close()
 
