@@ -107,6 +107,44 @@ def publish_sensor(items_notes):
         "items": items[:30], "dashboard_path": "20-dashboards/Dashboards.md"}})
 
 
+VIEW_SELECT = ideas.CFG.get("collection_view_entity", "input_select.ideas_ver_coleccion")
+
+
+def col_slug(name):
+    """Same as Home Assistant's slugify for these names: 'Música' -> 'musica', 'What2Do' -> 'what2do'."""
+    return re.sub(r"[^a-z0-9]+", "_", ideas.norm(name)).strip("_")
+
+
+def publish_collections():
+    """sensor.ideas_coleccion_<slug>: every recognised note of one collection (all modes), newest first, for the
+    «Por colección» viewer in Home Assistant; keeps the viewer's selector options in step with the collections."""
+    if not ideas.HA:
+        return
+    groups = {}
+    for mode, m in ideas.MODES.items():
+        d = os.path.join(ideas.BASE, m["folder"])
+        rel = os.path.relpath(d, ideas.VAULT).replace(os.sep, "/")
+        for f in sorted(os.listdir(d)) if os.path.isdir(d) else []:
+            if f.endswith(".md"):
+                fm, title, _ = frontmatter(os.path.join(d, f))
+                if fm.get("collection"):
+                    groups.setdefault(fm["collection"], []).append({
+                        "t": title, "s": (fm.get("summary") or "")[:110], "d": fm.get("created", ""),
+                        "st": fm.get("status", ""), "p": f"{rel}/{f}"})
+    order = [n for n, _ in ideas.COLLECTIONS] + sorted(set(groups) - {n for n, _ in ideas.COLLECTIONS})
+    names = [n for n in order if n in groups]
+    for name in names:
+        items = sorted(groups[name], key=lambda x: (x["d"], x["p"]), reverse=True)
+        ha("POST", f"states/sensor.ideas_coleccion_{col_slug(name)}", json={"state": len(items), "attributes": {
+            "friendly_name": f"Ideas: {name}", "icon": "mdi:folder-multiple-image", "unit_of_measurement": "notas",
+            "collection": name, "items": items}})
+    sel = ha("GET", f"states/{VIEW_SELECT}")
+    if sel.ok and sel.json()["attributes"].get("options") != names and names:
+        ha("POST", "services/input_select/set_options", json={"entity_id": VIEW_SELECT, "options": names})
+        if sel.json()["state"] in names:
+            ha("POST", "services/input_select/select_option", json={"entity_id": VIEW_SELECT, "option": sel.json()["state"]})
+
+
 def cell(s):
     return str(s or "—").replace("|", "/").replace("\n", " ")
 
@@ -175,6 +213,10 @@ def run():
         publish_sensor(ns)
     except Exception as e:
         log("[vault] sensor error:", type(e).__name__, e)
+    try:
+        publish_collections()
+    except Exception as e:
+        log("[vault] collections error:", type(e).__name__, e)
     text = render(ns)
     old = open(DASH, encoding="utf-8").read() if os.path.exists(DASH) else ""
     if text != old:
