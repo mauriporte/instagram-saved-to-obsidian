@@ -23,6 +23,7 @@ BACKLOG = int(arg("--backlog", CFG.get("backlog_per_run", 15)))  # older items p
 MAX_NEW = int(CFG.get("max_new_per_run", 25))                    # safety cap for new saves per run
 ONLY = arg("--only", None)
 DRY = "--dry-run" in sys.argv
+MAX_TRIES = 3  # a post whose download/analysis fails this many times is set aside (state.json "failed")
 CONTINUOUS = "--continuous" in sys.argv  # started by links.py's continuous switch: reuse a recent Instagram sync
 ORDER_ARG ="newest" if "--newest-first" in sys.argv else "oldest" if "--oldest-first" in sys.argv else None
 VAULT = CFG["vault"]
@@ -254,6 +255,10 @@ _whisper = None
 
 def transcribe(path):
     global _whisper
+    import av
+    with av.open(path) as c:  # silent videos (no audio stream) made faster-whisper raise IndexError
+        if not c.streams.audio:
+            return "", "?"
     from faster_whisper import WhisperModel
     if _whisper is None:
         try:
@@ -549,6 +554,7 @@ def scan():
         sync(cl, state)
         state["last_sync"] = dt.datetime.now().isoformat(timespec="seconds")
     save()
+    failed = state.setdefault("failed", {})  # pk -> failed attempts; after MAX_TRIES the post is skipped (kept, not done)
     newest_first = run_order() == "newest"
     queue_new, queue_old = [], []
     for name, mode in COLLECTIONS:
@@ -557,7 +563,7 @@ def scan():
             continue
         base = set(c["baseline"] or [])
         for it in (c["items"] if newest_first else reversed(c["items"])):  # items are stored newest first
-            if it["pk"] in done:
+            if it["pk"] in done or failed.get(it["pk"], 0) >= MAX_TRIES:  # set aside after repeated failures
                 continue
             (queue_old if it["pk"] in base else queue_new).append((name, mode, it))
     queue = queue_new[:MAX_NEW] + queue_old[:BACKLOG]
@@ -569,6 +575,8 @@ def scan():
     for n, (name, mode, it) in enumerate(queue):
         progress(f"{round(100 * n / len(queue))} % ({n}/{len(queue)})", n, len(queue))
         d = process(cl, name, mode, it, done)
+        if not d and it["pk"] not in done:  # failed (not just "not relevant"): count it
+            failed[it["pk"]] = failed.get(it["pk"], 0) + 1
         save()
         ok += bool(d)
         if d and MODES[mode]["notify"]:
