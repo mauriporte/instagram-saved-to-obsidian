@@ -205,6 +205,24 @@ def check_move(st, save):
     publish_collections()
 
 
+def publish_pending():
+    """sensor.insta_ideas_pendientes: posts left to process per collection (every configured collection), from the
+    last Instagram sync in state.json; set-aside posts (failed MAX_TRIES times) are counted apart."""
+    if not ideas.HA or not os.path.exists(ideas.STATE):
+        return
+    st = json.load(open(ideas.STATE, encoding="utf-8"))
+    done, failed = set(st.get("done", [])), st.get("failed", {})
+    rows = []
+    for name, _ in ideas.COLLECTIONS:
+        items = (st.get("collections", {}).get(name) or {}).get("items") or []
+        left = [i for i in items if i["pk"] not in done]
+        aside = sum(failed.get(i["pk"], 0) >= ideas.MAX_TRIES for i in left)
+        rows.append({"c": name, "p": len(left) - aside, "f": aside, "t": len(items)})
+    ha("POST", "states/sensor.insta_ideas_pendientes", json={"state": sum(r["p"] for r in rows), "attributes": {
+        "friendly_name": "Ideas: pendientes", "icon": "mdi:progress-clock", "unit_of_measurement": "posts",
+        "last_sync": st.get("last_sync"), "rows": rows}})
+
+
 def publish_collections():
     """sensor.ideas_coleccion_<slug>: every recognised note of one collection (all modes), newest first, for the
     «Por colección» viewer in Home Assistant; keeps the viewer's selector options in step with the collections."""
@@ -369,6 +387,7 @@ def run():
         log("[vault] sensor error:", type(e).__name__, e)
     try:
         publish_collections()
+        publish_pending()
     except Exception as e:
         log("[vault] collections error:", type(e).__name__, e)
     text = render(ns)
