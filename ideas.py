@@ -91,6 +91,16 @@ ticketing site, one item each as "date (day month year) — city, country — ve
 never invent dates. If the post is itself about a specific EVENT (a concert, festival, club night): kind = "event",
 where = venue + full address, when = exact date(s) with year, maps = a Google Maps link for the venue
 (https://www.google.com/maps/search/?api=1&query=<venue and address, URL-encoded>); otherwise leave those empty."""},
+    "learn": {"folder": "Learn Instagram", "emoji": "🎓", "notify": False,
+              "about": "cursos y cosas que aprender",
+              "task": """{owner} saved this to LEARN: a course, workshop, tutorial series, book or topic to study. Identify
+it with WebSearch/WebFetch. Fill: what = a summary of what it teaches and for whom (2-3 sentences); url = the main
+official link (course page, site, video or book page); github = its GitHub repository if there is one, else ""; signup =
+the sign-up / enrolment / registration link if available, else ""; format = "online" (virtual), "presencial" (you have to
+attend in person) or "mixto" (both), "" if unknown; price (free, price or "?"); when = dates, schedule or duration if any;
+for presencial or mixto also where (venue + full address) and maps (a Google Maps link for the venue:
+https://www.google.com/maps/search/?api=1&query=<venue and address, URL-encoded>); steps = what you would learn, as a short
+list of topics. Only links you actually found; never invent them."""},
     "home": {"folder": "Home Instagram", "emoji": "🏠", "notify": False,
              "about": "trucos y cosas que hacer en casa",
              "task": """{owner} saved this as a HOME TIP: something practical to do at home, nothing digital (cleaning,
@@ -436,10 +446,10 @@ tags (one-word list)."""
 SCHEMA = {"type": "object",
           "required": ["relevant", "title", "one_liner", "url", "what", "fit", "steps", "effort", "value",
                        "claude", "ha", "pros", "cons", "where", "when", "kind", "price", "maps", "rating", "reviews",
-                       "quote", "artist", "song", "artist_url", "tour", "start", "end", "tags"],
+                       "quote", "artist", "song", "artist_url", "tour", "start", "end", "github", "signup", "format", "tags"],
           "properties": {k: {"type": "string"} for k in ("title", "one_liner", "url", "what", "fit", "claude", "ha",
                                                          "where", "when", "price", "maps", "rating", "quote", "artist", "song",
-                                                         "artist_url", "start", "end")}
+                                                         "artist_url", "start", "end", "github", "signup", "format")}
           | {k: {"type": "array", "items": {"type": "string"}} for k in ("pros", "cons", "reviews", "tour")}
           | {"relevant": {"type": "boolean"}, "steps": {"type": "array", "items": {"type": "string"}},
              "tags": {"type": "array", "items": {"type": "string"}},
@@ -526,6 +536,15 @@ def body_for(mode, d, post_url, pics=()):
         return head + (f"- **Artista:** {artist}\n- **Canción:** {g('song') or '?'}\n"
                        f"- **Escuchar:** {g('url') or f'https://open.spotify.com/search/{q}'}\n- **Post:** {post_url}\n\n{g('what')}\n"
                        f"{event}\n## Próximos conciertos en Europa\n{tour}\n")
+    if mode == "learn":
+        fmt = {"online": "Online (virtual)", "presencial": "Presencial", "mixto": "Mixto (online y presencial)"}.get(g("format"), g("format") or "?")
+        maps = g("maps") if g("maps").startswith("https://") else ""
+        rows = [f"- **Formato:** {fmt}", f"- **Enlace:** {g('url') or '—'}", f"- **GitHub:** {g('github')}" * bool(g("github")),
+                f"- **Inscripción:** {g('signup')}" * bool(g("signup")), f"- **Precio:** {g('price')}" * bool(g("price")),
+                f"- **Cuándo:** {g('when')}" * bool(g("when")),
+                (f"- **Dónde:** {g('where')}" + (f" · [Google Maps]({maps})" if maps else "")) * bool(g("where")),
+                f"- **Post:** {post_url}"]
+        return head + "\n".join(r for r in rows if r) + f"\n\n## Qué es\n{g('what')}\n\n## Qué aprenderías\n{lst(d.get('steps')) or '—'}\n"
     if mode == "home":
         text = "\n".join("> " + l if l.strip() else ">" for l in g("quote").splitlines()) if g("quote") else ""
         return head + (f"{g('what')}\n\n## Cómo\n{lst(d.get('steps')) or '—'}\n\n" + (f"## Texto\n{text}\n\n" if text else "") +
