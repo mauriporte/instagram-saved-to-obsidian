@@ -161,8 +161,11 @@ def publish_sensor(st):
         "items": items[:30], "dashboard_path": "20-dashboards/Dashboards.md"}})
     ha("POST", "states/sensor.ideas_total", json={"state": len(every), "attributes": {
         "friendly_name": "Ideas procesadas", "icon": "mdi:lightbulb-group", "unit_of_measurement": "ideas"}})
-    ha("POST", "states/sensor.ideas_completadas", json={"state": sum(n.get("status") == "hecha" for n in every), "attributes": {
-        "friendly_name": "Completadas", "icon": "mdi:check-circle", "unit_of_measurement": "ideas"}})
+    done = sorted((n for n in every if n.get("status") == "hecha"), key=lambda n: (n.get("updated", ""), n["file"]), reverse=True)
+    ha("POST", "states/sensor.ideas_completadas", json={"state": len(done), "attributes": {
+        "friendly_name": "Completadas", "icon": "mdi:check-circle", "unit_of_measurement": "ideas",
+        "items": [{"t": n["title"], "c": n.get("collection", ""), "d": n.get("updated", ""), "s": (n.get("summary") or "")[:110],
+                   "p": rel(n)} for n in done]}})  # newest completion first, for the «Completadas» page
 
 
 VIEW_SELECT = ideas.CFG.get("collection_view_entity", "input_select.ideas_ver_coleccion")
