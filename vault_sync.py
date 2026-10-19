@@ -219,7 +219,7 @@ def publish_pending():
         aside = sum(failed.get(i["pk"], 0) >= ideas.MAX_TRIES for i in left)
         rows.append({"c": name, "p": len(left) - aside, "f": aside, "t": len(items)})
     ha("POST", "states/sensor.insta_ideas_pendientes", json={"state": sum(r["p"] for r in rows), "attributes": {
-        "friendly_name": "Ideas: pendientes", "icon": "mdi:progress-clock", "unit_of_measurement": "posts",
+        "friendly_name": "Ideas: pendientes", "icon": "mdi:progress-clock",
         "last_sync": st.get("last_sync"), "rows": rows}})
     ent = ideas.CFG.get("collection_entity")  # the scan's «Colección» selector shows the posts left: "Work · 49"
     sel = ha("GET", f"states/{ent}") if ent else None
