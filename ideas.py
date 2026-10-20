@@ -126,7 +126,9 @@ song, url = a direct Spotify track link you actually found (https://open.spotify
 what = one or two sentences on the moment the clip or photo shows. Never invent a song: if unsure, song = "" and
 say so in what. Also where the concert was, from the caption, location tag, on-screen text or the artist's tour dates
 (setlist.fm): city = just the city name (e.g. "San Bernardino"), where = venue, city and country, when = the date with
-year; "" for any you cannot confirm."""},
+year; "" for any you cannot confirm. setlist = that night's setlist in order, one song per item, from setlist.fm
+(a part like "Intermission" as its own item), and setlist_url = that setlist.fm page; [] and "" if you cannot find
+it. If the caption section starts with the concert's details and setlist, use them and match the clip against it."""},
     "food": {"folder": "Food Instagram", "emoji": "🍳", "notify": False,
              "about": "recetas y sugerencias de comida",
              "task": """{owner} saved this as FOOD: a recipe or a food suggestion. Write the recipe in text (in the
@@ -543,12 +545,13 @@ tags (one-word list)."""
 SCHEMA = {"type": "object",
           "required": ["relevant", "title", "one_liner", "url", "what", "fit", "steps", "effort", "value",
                        "claude", "ha", "pros", "cons", "where", "when", "kind", "price", "maps", "rating", "reviews",
-                       "quote", "artist", "song", "artist_url", "tour", "start", "end", "github", "signup", "format", "ingredients", "variants", "tags", "city", "studio", "credit"],
+                       "quote", "artist", "song", "artist_url", "tour", "start", "end", "github", "signup", "format", "ingredients", "variants", "tags", "city", "studio", "credit", "setlist", "setlist_url"],
           "properties": {k: {"type": "string"} for k in ("title", "one_liner", "url", "what", "fit", "claude", "ha",
                                                          "where", "when", "price", "maps", "rating", "quote", "artist", "song",
                                                          "artist_url", "start", "end", "github", "signup", "format",
-                                                         "city", "studio", "credit")}
-          | {k: {"type": "array", "items": {"type": "string"}} for k in ("pros", "cons", "reviews", "tour", "ingredients", "variants")}
+                                                         "city", "studio", "credit", "setlist_url")}
+          | {k: {"type": "array", "items": {"type": "string"}} for k in ("pros", "cons", "reviews", "tour", "ingredients", "variants",
+                                                                           "setlist")}
           | {"relevant": {"type": "boolean"}, "steps": {"type": "array", "items": {"type": "string"}},
              "tags": {"type": "array", "items": {"type": "string"}},
              "kind": {"type": "string", "enum": ["event", "place", "activity", ""]},
@@ -645,10 +648,24 @@ def body_for(mode, d, post_url, pics=()):
     if mode == "concert":
         q = urllib.parse.quote(f"{g('artist')} {g('song')}".strip())
         gig = g("concert") or " — ".join(x for x in (g("artist"), g("where") or g("city")) if x) or "?"
-        return head + (f"- **Concierto:** {gig}\n- **Cuándo:** {g('when') or '—'}\n- **Dónde:** {g('where') or '—'}\n"
+        out = head + (f"- **Concierto:** {gig}\n- **Cuándo:** {g('when') or '—'}\n- **Dónde:** {g('where') or '—'}\n"
                        f"- **Canción:** {g('song') or '?'} · {g('artist') or '?'}\n"
                        f"- **Escuchar:** {g('url') or f'https://open.spotify.com/search/{q}'}\n- **Post:** {post}\n\n"
                        f"## El momento\n{g('what')}\n")
+        songs = [s for s in d.get("setlist") or [] if s]
+        if songs:  # the song of this clip in bold
+            n = 0
+            lines = []
+            for s in songs:
+                if s.lower() in ("intermission", "encore", "intermedio", "bis"):
+                    lines.append(f"\n*{s}*\n"); continue
+                n += 1
+                lines.append(f"{n}. **{s}**" if g("song") and s.lower() == g("song").lower() else f"{n}. {s}")
+            out += "\n## Setlist\n" + "\n".join(lines) + "\n"
+        links = ([g("setlist_url")] if g("setlist_url") else []) + [u for u in d.get("links") or [] if u != g("setlist_url")]
+        if links:
+            out += "\n## Fuentes\n" + "\n".join(f"- {u}" for u in links) + "\n"
+        return out
     if mode == "food":
         ing ="\n".join(f"- {x}" for x in d.get("ingredients") or [] if x) or "—"
         var = "\n".join(f"- {x}" for x in d.get("variants") or [] if x) or "_No se conocen otras versiones destacadas._"
@@ -743,7 +760,7 @@ def save_pictures(code, imgs, n=4):
 def write_note(mode, collection, d, post_url, brain, when, pics=()):
     concert = CONCERTS.get(collection)
     if concert:  # the concert's date and place come from config.json, Claude's guess only fills a gap
-        d = {**d, "concert": collection, **{k: concert[k] for k in ("when", "where") if concert.get(k)}}
+        d = {**d, "concert": collection, **{k: concert[k] for k in ("when", "where", "setlist", "setlist_url", "links") if concert.get(k)}}
     sub = concert["folder"] if concert else slug(d["city"]) if mode == "concert" and d.get("city") else ""  # one folder per city
     folder = os.path.join(BASE, MODES[mode]["folder"], *([sub] if sub else []))
     collection = (concert or {}).get("as", collection)  # one-off concert collection filed as another (e.g. Sb -> Concerts)
@@ -832,6 +849,15 @@ def credits(cl, it):
             f"\nTagged accounts: {tags or 'none'}\nLocation tag: {place or 'none'}\nCaption: ")
 
 
+def concert_info(collection):
+    """A one-off concert's known details (config "concerts"), so Claude matches the clip against that night's setlist."""
+    c = CONCERTS.get(collection)
+    if not c:
+        return ""
+    return (f"Concert: {collection} — {c.get('when') or '?'} — {c.get('where') or '?'}\n"
+            f"Setlist: {' | '.join(c.get('setlist') or []) or 'unknown'}\nCaption: ")
+
+
 def process(cl, collection, mode, it, done):
     post_url = f"https://www.instagram.com/{'reel' if it['type'] == 2 else 'p'}/{it['code']}/"
     tmp = tempfile.mkdtemp(prefix="insta_", dir=HERE)
@@ -849,7 +875,8 @@ def process(cl, collection, mode, it, done):
                 " — open them with the Read tool to read on-screen text.") if imgs else ""
         prompt = PROMPT.format(owner=OWNER, language=LANGUAGE, collection=collection,
                                task=MODES[mode]["task"].format(owner=OWNER, collection=collection), context=CONTEXT, post_url=post_url,
-                               caption=(credits(cl, it) if mode in CREDIT_MODES else "") + (it["caption"] or "(none)"),
+                               caption=(credits(cl, it) if mode in CREDIT_MODES else "") + concert_info(collection)
+                               + (it["caption"] or "(none)"),
                                transcript=transcript.strip()[:6000] or "(no speech)",
                                lang=lang, urls=", ".join(urls) or "none", frames_hint=hint)
         try:
