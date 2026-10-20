@@ -12,10 +12,17 @@ what each post is actually about and files it in your **Obsidian** vault, with a
 | `idea` | What the tool/repo is (exact URL), how it fits **your** setup, concrete implementation steps, effort/value. Non-tech posts are skipped. |
 | `plan` | What, where (with a map link), when, price, practical tips. |
 | `personal` | The exact quote / key sentence and the core message. |
+| `growth` | Personal development: the idea, how to put it into practice (steps) and how it fits your life. |
 | `music` | Artist, song and a link to listen. |
+| `concert` | A moment from a concert you attended: the song (matched against that night's setlist.fm setlist, shown with the clip's song in bold), date, venue, sources. One subfolder per city. |
+| `tattoo` / `art` | The picture, who made it (the poster, credited in the caption or tagged) and their studio/gallery with a map link. The post's poster, tags and location tag are fetched for this. |
+| `fun` | One line and the joke's text, no analysis. |
+| `odd` | What the post is, why it is strange, plus the transcript of any speech. |
+| `food`, `learn`, `home`, `general` | Recipe; course/topic with sign-up; home ideas; a short summary. |
 | `private` | One neutral, non-explicit line. |
 
-Each collection is mapped to a mode in `config.json`, in priority order.
+Each collection is mapped to a mode in `config.json`, in priority order. Two posts that end up with the same title get
+numbered notes (`Schism`, `Schism (2)`…); a note is never overwritten by another post's note.
 
 ## How it works
 
@@ -67,6 +74,8 @@ Then schedule it daily (Windows Task Scheduler, cron, …): `python ideas.py`.
 | `vault`, `notes_subfolder`, `home_note` | Where the notes go; `home_note` (optional) gets a link to each index. |
 | `assets_subfolder`, `picture_modes` | Where saved pictures go (default `90-assets/instagram`) and which modes show them (default plan, personal, music; videos give one frame, carousels up to 4). |
 | `collections` | `[collection name, mode]` pairs in priority order (names match ignoring case/accents). |
+| `concerts` | Optional one-off concert collections, by display name: `{"instagram": name on Instagram, "as": collection its notes are filed under, "folder": subfolder, "when", "where", "setlist": [...], "setlist_url", "links": [...]}`. The setlist is given to Claude to identify each clip's song. A regular `concert` collection finds all of this per post instead. |
+| `calendar` | `{"entity": "calendar.x", "collections": [...], "optional": [...]}`: dated events from `collections` go to that calendar (a post without a clear date triggers a notification); `optional` collections add only their dated events and never warn (e.g. travel ideas that are mostly places). |
 | `modes` | Optional overrides per mode: `folder`, `emoji`, `notify`, `about`. |
 | `backlog_per_run`, `max_new_per_run` | How many older / new items per run. |
 | `order` | `"oldest"` (default) or `"newest"`: which saves go first. `--oldest-first` / `--newest-first` override it for one run. |
