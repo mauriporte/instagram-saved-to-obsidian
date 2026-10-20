@@ -291,6 +291,25 @@ IMAGE_TYPES = {".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png",
                ".html": "text/html; charset=utf-8", ".pdf": "application/pdf"}
 
 
+def maps_embed_url(url):
+    """Google's keyless map embed for a full Google Maps link (same rules as the Beeper card's JS): coordinates
+    (@lat,lng), ?query= / ?q=, or a /place/ or /search/ name. "" if the link doesn't say a place."""
+    import urllib.parse
+    u = urllib.parse.urlsplit(url)
+    if not re.search(r"(^|\.)google\.[a-z.]+$", u.hostname or "") or "/maps" not in u.path + "/" + u.hostname:
+        return ""
+    qs = urllib.parse.parse_qs(u.query)
+    m = re.search(r"@(-?\d+\.\d+),(-?\d+\.\d+)(?:,(\d+(?:\.\d+)?)z)?", u.path)
+    place = re.search(r"/maps/(?:place|search)/([^/@]+)", u.path)
+    q = ((qs.get("query") or qs.get("q") or [""])[0]
+         or (urllib.parse.unquote_plus(place.group(1)) if place else "")
+         or (f"{m.group(1)},{m.group(2)}" if m else ""))
+    if not q:
+        return ""
+    zoom = round(float(m.group(3))) if m and m.group(3) else 15
+    return f"https://maps.google.com/maps?q={urllib.parse.quote(q)}&z={zoom}&output=embed"
+
+
 def serve_images():
     """Read-only server for vault files (images_server: {"port", "folders", "key"}), so Home Assistant's Notes Vault
     can show them without copying them anywhere: GET /vault-img/<key>/<path in the vault or bare file name>; only
@@ -326,9 +345,35 @@ def serve_images():
             reels[code] = (time.time(), url)
         return url
 
+    maps = {}  # short link -> embed URL
+
+    def map_embed(url):
+        """Keyless Google Maps embed for a short share link (maps.app.goo.gl / goo.gl/maps): follow it once to the
+        full Google Maps address, which says the place."""
+        if url not in maps:
+            final = requests.get(url, allow_redirects=True, timeout=15, headers={"User-Agent": "Mozilla/5.0"}).url
+            q = urllib.parse.parse_qs(urllib.parse.urlsplit(final).query)
+            if "consent.google" in final and q.get("continue"):  # EU consent page: the real address is in "continue"
+                final = q["continue"][0]
+            maps[url] = maps_embed_url(final)
+        return maps[url]
+
     class H(BaseHTTPRequestHandler):
         def do_GET(self):
             rel = urllib.parse.unquote(urllib.parse.urlsplit(self.path).path)
+            if rel == prefix + "maps":  # Beeper card / Notes: a map for a Google Maps short link
+                u = (urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query).get("u") or [""])[0]
+                if not re.match(r"https://(maps\.app\.goo\.gl|goo\.gl/maps)/[\w-]+$", u):
+                    self.send_error(404); return
+                try:
+                    embed = map_embed(u)
+                except Exception as e:
+                    log("[links] map not resolved:", type(e).__name__)
+                    embed = ""
+                if not embed:
+                    self.send_error(404); return
+                self.send_response(302); self.send_header("Location", embed); self.send_header("Cache-Control", "no-store")
+                self.end_headers(); return
             m = re.fullmatch(re.escape(prefix) + r"reel/([\w-]{5,40})", rel)
             if m:  # the Beeper chat card plays reels linked in messages: send the browser to the video itself
                 try:
