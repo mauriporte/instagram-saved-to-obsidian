@@ -222,33 +222,8 @@ def heartbeat(st):
             "attributes": {"friendly_name": "Ideas: último ciclo", "device_class": "timestamp", "icon": "mdi:robot-happy-outline",
                            "beeper_token_ok": st.get("beeper_ok"), "links_processed": len(st.get("done", [])),
                            "interval_s": int(CFG.get("interval", 120))}})
-        img = ideas.CFG.get("images_server")
-        if img:  # for the Notes Vault patch: the key is readable only with a Home Assistant login
-            ha("POST", "states/sensor.vault_images", json={"state": "on", "attributes": {
-                "friendly_name": "Ideas: imágenes del vault", "icon": "mdi:image-multiple", "key": img["key"],
-                "lan": img.get("lan", "")}})  # e.g. http://<pc-ip>:8796, for viewers at home
     except Exception as e:
         log("[links] heartbeat error:", type(e).__name__)
-    try:
-        private_repos()
-    except Exception as e:
-        log("[links] private repos error:", type(e).__name__)
-
-
-def private_repos():
-    """sensor.repo_<name> for each local clone in config "private_repos" ([{"name", "path"}]): GitHub badges can't
-    see private repos, so the dashboard shows these instead (last commit, unpushed commits, uncommitted files)."""
-    for r in ideas.CFG.get("private_repos") or []:
-        git = lambda *a: subprocess.run(["git", "-C", r["path"], *a], capture_output=True, text=True, timeout=20,
-                                        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0)).stdout.strip()
-        when, msg = (git("log", "-1", "--format=%cI%x09%s").split("\t", 1) + [""])[:2]
-        ahead = git("rev-list", "--count", "@{u}..HEAD") or "?"
-        dirty = len([l for l in git("status", "--porcelain").splitlines() if l.strip()])
-        slug = re.sub(r"\W+", "_", r["name"].lower()).strip("_")
-        ha("POST", f"states/sensor.repo_{slug}", json={"state": when or "unknown", "attributes": {
-            "friendly_name": f"Repo {r['name']}", "device_class": "timestamp", "icon": "mdi:github",
-            "last_commit": msg, "unpushed": int(ahead) if ahead.isdigit() else None, "uncommitted": dirty,
-            "url": f"https://github.com/{r.get('owner', 'mauriporte')}/{r['name']}", "private": True}})
 
 
 LAST_START = [0.0]  # the new scan takes a few seconds to take its lock; don't start another meanwhile
@@ -287,134 +262,8 @@ def scan_button(st):
         ideas.progress("Inactivo", running=False)
 
 
-IMAGE_TYPES = {".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png", ".gif": "image/gif", ".webp": "image/webp",
-               ".html": "text/html; charset=utf-8", ".pdf": "application/pdf"}
-
-
-def maps_embed_url(url):
-    """Google's keyless map embed for a full Google Maps link (same rules as the Beeper card's JS): coordinates
-    (@lat,lng), ?query= / ?q=, or a /place/ or /search/ name. "" if the link doesn't say a place."""
-    import urllib.parse
-    u = urllib.parse.urlsplit(url)
-    if not re.search(r"(^|\.)google\.[a-z.]+$", u.hostname or "") or "/maps" not in u.path + "/" + u.hostname:
-        return ""
-    qs = urllib.parse.parse_qs(u.query)
-    m = re.search(r"@(-?\d+\.\d+),(-?\d+\.\d+)(?:,(\d+(?:\.\d+)?)z)?", u.path)
-    place = re.search(r"/maps/(?:place|search)/([^/@]+)", u.path)
-    q = ((qs.get("query") or qs.get("q") or [""])[0]
-         or (urllib.parse.unquote_plus(place.group(1)) if place else "")
-         or (f"{m.group(1)},{m.group(2)}" if m else ""))
-    if not q:
-        return ""
-    zoom = round(float(m.group(3))) if m and m.group(3) else 15
-    return f"https://maps.google.com/maps?q={urllib.parse.quote(q)}&z={zoom}&output=embed"
-
-
-def serve_images():
-    """Read-only server for vault files (images_server: {"port", "folders", "key"}), so Home Assistant's Notes Vault
-    can show them without copying them anywhere: GET /vault-img/<key>/<path in the vault or bare file name>; only
-    pictures, HTML and PDF under `folders`."""
-    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-    import threading, urllib.parse
-    cfg = ideas.CFG.get("images_server")
-    if not cfg:
-        return
-    roots = [os.path.realpath(os.path.join(ideas.VAULT, d)) for d in cfg.get("folders", ["90-assets"])]
-    prefix = f"/vault-img/{cfg['key']}/"  # the key in the path: the tunnel route is reachable from the internet
-    names = {}
-
-    def by_name(name):
-        """Notes embed files by bare file name, as Obsidian resolves them: find it under `folders`."""
-        if name not in names:
-            names.clear()
-            for root in roots:
-                for d, _, fs in os.walk(root):
-                    for x in fs:
-                        names.setdefault(x, os.path.join(d, x))
-        return names.get(name, "")
-
-    reels = {}  # code -> (resolved at, video URL): Instagram's CDN links are signed and expire, so re-resolve after a while
-
-    def reel_url(code):
-        """Direct video URL of a public Instagram reel/post (yt-dlp, no login: the Insta-Ideas session isn't used)."""
-        t, url = reels.get(code, (0, ""))
-        if time.time() - t > 1200:
-            import yt_dlp
-            with yt_dlp.YoutubeDL({"quiet": True, "no_warnings": True, "skip_download": True, "format": "best[ext=mp4]/best"}) as y:
-                url = (y.extract_info(f"https://www.instagram.com/reel/{code}/", download=False) or {}).get("url", "")
-            reels[code] = (time.time(), url)
-        return url
-
-    maps = {}  # short link -> embed URL
-
-    def map_embed(url):
-        """Keyless Google Maps embed for a short share link (maps.app.goo.gl / goo.gl/maps): follow it once to the
-        full Google Maps address, which says the place."""
-        if url not in maps:
-            final = requests.get(url, allow_redirects=True, timeout=15, headers={"User-Agent": "Mozilla/5.0"}).url
-            q = urllib.parse.parse_qs(urllib.parse.urlsplit(final).query)
-            if "consent.google" in final and q.get("continue"):  # EU consent page: the real address is in "continue"
-                final = q["continue"][0]
-            maps[url] = maps_embed_url(final)
-        return maps[url]
-
-    class H(BaseHTTPRequestHandler):
-        def do_GET(self):
-            rel = urllib.parse.unquote(urllib.parse.urlsplit(self.path).path)
-            if rel == prefix + "maps":  # Beeper card / Notes: a map for a Google Maps short link
-                u = (urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query).get("u") or [""])[0]
-                if not re.match(r"https://(maps\.app\.goo\.gl|goo\.gl/maps)/[\w-]+$", u):
-                    self.send_error(404); return
-                try:
-                    embed = map_embed(u)
-                except Exception as e:
-                    log("[links] map not resolved:", type(e).__name__)
-                    embed = ""
-                if not embed:
-                    self.send_error(404); return
-                self.send_response(302); self.send_header("Location", embed); self.send_header("Cache-Control", "no-store")
-                self.end_headers(); return
-            m = re.fullmatch(re.escape(prefix) + r"reel/([\w-]{5,40})", rel)
-            if m:  # the Beeper chat card plays reels linked in messages: send the browser to the video itself
-                try:
-                    url = reel_url(m.group(1))
-                except Exception as e:
-                    log("[links] reel not resolved:", m.group(1), type(e).__name__)
-                    url = ""
-                if not url.startswith("https://"):
-                    self.send_error(404); return
-                self.send_response(302); self.send_header("Location", url); self.send_header("Cache-Control", "no-store")
-                self.end_headers(); return
-            f = os.path.realpath(os.path.join(ideas.VAULT, rel.removeprefix(prefix)))
-            if "/" not in rel.removeprefix(prefix):
-                f = os.path.realpath(by_name(rel.removeprefix(prefix)) or f)
-            kind = IMAGE_TYPES.get(os.path.splitext(f)[1].lower())
-            if (not rel.startswith(prefix) or not kind or not any(f.startswith(r + os.sep) for r in roots)
-                    or not os.path.isfile(f)):
-                self.send_error(404); return
-            body = open(f, "rb").read()
-            self.send_response(200)
-            self.send_header("Content-Type", kind); self.send_header("Content-Length", str(len(body)))
-            if kind.startswith("text/html"):  # served from HA's own address: no scripts, no access to its storage
-                self.send_header("Content-Security-Policy", "sandbox allow-popups allow-popups-to-escape-sandbox")
-            self.send_header("Cache-Control", "private, max-age=86400" if kind.startswith("image/") else "no-cache")  # reports change in place
-            self.end_headers(); self.wfile.write(body)
-
-        def log_message(self, *a):  # quiet: the watcher log is for ideas
-            pass
-
-    srv = ThreadingHTTPServer(("0.0.0.0", int(cfg.get("port", 8796))), H)
-    threading.Thread(target=srv.serve_forever, daemon=True).start()
-    log(f"[links] vault pictures served on port {srv.server_address[1]}")
-
-
 def main():
     st = load_state()
-    if "--url" not in sys.argv and "--once" not in sys.argv:
-        try:
-            serve_images()
-        except OSError as e:  # port taken (another watcher running): pictures are already being served
-            log("[links] picture server not started:", e)
     if "--url" in sys.argv:
         print(handle(sys.argv[sys.argv.index("--url") + 1], st)); return
     while True:
