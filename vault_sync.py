@@ -192,12 +192,12 @@ def all_notes():
     """Every Insta-Ideas note in every mode folder, with its frontmatter."""
     out = []
     for mode, m in ideas.MODES.items():
-        d = os.path.join(ideas.BASE, m["folder"])
-        for f in sorted(os.listdir(d)) if os.path.isdir(d) else []:
-            if f.endswith(".md"):
-                fm, title, _ = frontmatter(os.path.join(d, f))
-                if fm.get("collection"):
-                    out.append({"file": f, "path": os.path.join(d, f), "title": title, "mode": mode, **fm})
+        for d, _, files in os.walk(os.path.join(ideas.BASE, m["folder"])):  # walk: concerts have one subfolder each
+            for f in sorted(files):
+                if f.endswith(".md"):
+                    fm, title, _ = frontmatter(os.path.join(d, f))
+                    if fm.get("collection"):
+                        out.append({"file": f, "path": os.path.join(d, f), "title": title, "mode": mode, **fm})
     return out
 
 
@@ -214,7 +214,8 @@ def relocate(notes_):
         mode = mode_of(n["collection"])
         if mode is None or mode == n["mode"]:  # unknown collections (e.g. deleted ones) stay where they are
             continue
-        dest_dir = os.path.join(ideas.BASE, ideas.MODES[mode]["folder"])
+        concert = ideas.CONCERTS.get(n["collection"])
+        dest_dir = os.path.join(ideas.BASE, ideas.MODES[mode]["folder"], *([concert["folder"]] if concert else []))
         os.makedirs(dest_dir, exist_ok=True)
         dest, i = os.path.join(dest_dir, n["file"]), 2
         while os.path.exists(dest):  # never overwrite a note with the same name
@@ -335,7 +336,7 @@ def publish_pending():
         ha("POST", f"states/sensor.insta_ideas_pendientes_{col_slug(r['c'])}", json={"state": r["p"], "attributes": {
             "friendly_name": r["c"], "icon": "mdi:folder-clock-outline", "unit_of_measurement": f"de {r['t']}",
             "collection": r["c"], "set_aside": r["f"], "processed": True}})
-    configured = {ideas.norm(r["c"]) for r in rows}
+    configured = {ideas.norm(r["c"]) for r in rows} | {ideas.norm(ideas.ig_name(r["c"])) for r in rows}  # + concerts' IG names
     for name, count in ig.items():  # Instagram collections Insta-Ideas doesn't process: just how many are saved
         if ideas.norm(name) not in configured:
             ha("POST", f"states/sensor.insta_ideas_pendientes_{col_slug(name)}", json={"state": count, "attributes": {

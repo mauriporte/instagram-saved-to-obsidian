@@ -53,6 +53,15 @@ LANGUAGE = CFG.get("language", "English")
 CONTEXT = CFG.get("profile", "")                    # who you are / your setup, so ideas are judged for fit
 # priority order; names matched case/accent/whitespace-insensitive («planes\n», «Música»)
 COLLECTIONS = [tuple(c) for c in CFG["collections"]]
+# one-off concert collections: display name -> {"instagram": its name on Instagram, "as": collection its notes are filed
+# under, "folder": subfolder, "when", "where"}
+CONCERTS = CFG.get("concerts") or {}
+
+
+def ig_name(name):
+    """The collection's name on Instagram (a concert is shown by its own name)."""
+    return CONCERTS.get(name, {}).get("instagram", name)
+
 
 MODES = {
     "idea": {"folder": "Ideas Instagram", "emoji": "💡", "notify": True, "skip_irrelevant": True,
@@ -90,6 +99,12 @@ to them: a saying, phrase, poem or reflection. TRANSCRIBE it completely and fait
 it appears on the image(s)/frames or is spoken (every line of a poem, line breaks kept, original language, no
 paraphrasing; open the images with the Read tool to read them), plus the author after a final line "— Author" if shown.
 what = the core message in 1-3 sentences, fit = in one or two sentences why it may resonate (gentle, no therapy talk)."""},
+    "growth": {"folder": "Crecimiento Instagram", "emoji": "🌱", "notify": False,
+               "about": "desarrollo personal: consejos, formas de hacer, hábitos y planes",
+               "task": """{owner} saved this for their personal development, growth or change: a tip, a suggestion, a
+way of doing things, a habit or a plan. Fill: what = the idea in 1-3 sentences; steps = how to put it into practice, as
+concrete actions; fit = one or two sentences on how it could fit {owner}'s life now (practical and gentle, no therapy
+talk); quote = the post's own words only if they are a short phrase worth keeping verbatim, else ""."""},
     "music": {"folder": "Música Instagram", "emoji": "🎵", "notify": False,
               "about": "canciones y artistas guardados",
               "task": """{owner} saved this for the MUSIC. Identify the song being played/referenced and the artist
@@ -102,6 +117,16 @@ ticketing site, one item each as "date (day month year) — city, country — ve
 never invent dates. If the post is itself about a specific EVENT (a concert, festival, club night): kind = "event",
 where = venue + full address, when = exact date(s) with year, maps = a Google Maps link for the venue
 (https://www.google.com/maps/search/?api=1&query=<venue and address, URL-encoded>); otherwise leave those empty."""},
+    "concert": {"folder": "Concerts", "emoji": "🎸", "notify": False,
+                "about": "momentos de conciertos a los que fui, una subcarpeta por concierto",
+                "task": """{owner} saved this at the concert «{collection}», which they attended. Identify the song being
+played and its artist: the headliner in the concert name unless the post shows an opening act. Use the caption,
+on-screen text and lyrics in the transcript, and WebSearch that night's setlist (setlist.fm) if needed. Fill: artist,
+song, url = a direct Spotify track link you actually found (https://open.spotify.com/track/...), "" if none;
+what = one or two sentences on the moment the clip or photo shows. Never invent a song: if unsure, song = "" and
+say so in what. Also where the concert was, from the caption, location tag, on-screen text or the artist's tour dates
+(setlist.fm): city = just the city name (e.g. "San Bernardino"), where = venue, city and country, when = the date with
+year; "" for any you cannot confirm."""},
     "food": {"folder": "Food Instagram", "emoji": "🍳", "notify": False,
              "about": "recetas y sugerencias de comida",
              "task": """{owner} saved this as FOOD: a recipe or a food suggestion. Write the recipe in text (in the
@@ -128,6 +153,37 @@ list of topics. Only links you actually found; never invent them."""},
 the post shows or says and why it may be worth keeping (2-3 sentences); steps = its key points as a short list (the
 things to remember, do or look at); url = the main link it refers to if there is one you can confirm, else "";
 quote = the text of the post if it is short (under about 80 words), else ""."""},
+    "odd": {"folder": "Raras Instagram", "emoji": "🌀", "notify": False,
+            "about": "posts raros que guardé por algo",
+            "task": """{owner} saved this odd, offbeat post for some reason. Fill: what = 2-4 sentences on what it is,
+what makes it strange or interesting, and any context worth knowing (WebSearch it if it is a known event, person, place
+or phenomenon); url = a link that explains it, if you found one, else ""; quote = the on-screen or caption text if it
+is short, else ""."""},
+    "fun": {"folder": "Humor Instagram", "emoji": "😂", "notify": False,
+            "about": "cosas graciosas guardadas",
+            "task": """{owner} saved this because it is funny. Do NOT explain or analyse the joke. Fill: title = a short
+title; one_liner = one short line saying what it is (e.g. "meme sobre...", "vídeo de un perro que..."); quote = the
+joke's text if it is text-based and short, else ""; leave every other field empty."""},
+    "tattoo": {"folder": "Tattoos Instagram", "emoji": "🖋️", "notify": False,
+               "about": "tatuajes guardados, con su artista y estudio",
+               "task": """{owner} saved this TATTOO for its design. Find who made it. The caption section starts with
+who posted it, the tagged accounts and the location tag. The artist may be the poster (a tattoo artist's own account:
+check with WebSearch/WebFetch), credited in the caption (@mention, "by", "artist:") or a tagged account. Fill:
+what = the tattoo in one sentence (style, motif, body placement); artist = the artist's name and @handle;
+artist_url = their Instagram profile (https://www.instagram.com/<handle>/); credit = "poster", "caption" or
+"tagged" (where you found the artist); studio = the tattoo studio's name; where = the studio's address, city and
+country; city = just the city; maps = a Google Maps link for the studio
+(https://www.google.com/maps/search/?api=1&query=<studio and address, URL-encoded>). Confirm the studio with the
+artist's bio, website or the location tag; "" for anything you cannot confirm, never invent an artist or studio."""},
+    "art": {"folder": "Arte Instagram", "emoji": "🎨", "notify": False,
+            "about": "arte guardado (pintura, ilustración), con su autor",
+            "task": """{owner} saved this ARTWORK (painting, drawing, illustration...). Find who made it. The caption
+section starts with who posted it, the tagged accounts and the location tag. The author may be the poster (an
+artist's own account: check with WebSearch/WebFetch), credited in the caption (@mention, "by", "artist:") or a tagged
+account. Fill: what = the piece in one sentence (technique, subject, style); artist = the author's name and @handle;
+artist_url = their Instagram profile or website; credit = "poster", "caption" or "tagged" (where you found the
+author); studio = the gallery or studio where it is shown, if any; where = its address, city and country; city = just
+the city; maps = a Google Maps link for it, else "". "" for anything you cannot confirm, never invent an author."""},
     "home": {"folder": "Home Instagram", "emoji": "🏠", "notify": False,
              "about": "trucos y cosas que hacer en casa",
              "task": """{owner} saved this as a HOME TIP: something practical to do at home, nothing digital (cleaning,
@@ -258,7 +314,9 @@ def notify(title, message, nid):
     log("HA notification", r.status_code)
 
 
-CALENDAR = CFG.get("calendar") or {}  # {"entity": "calendar.x", "collections": ["Attending"]}: events go to that calendar
+# {"entity": "calendar.x", "collections": ["Attending"], "optional": ["Travel"]}: events go to that calendar; an
+# "optional" collection adds only its dated events and never warns about the rest (restaurants, hotels...)
+CALENDAR = CFG.get("calendar") or {}
 CALENDAR_LOG = os.path.join(HERE, "calendar_added.json")
 
 
@@ -279,7 +337,10 @@ def event_times(d):
 
 def add_to_calendar(collection, d, post_url, key):
     """A complete, dated event from a calendar collection (config "calendar") becomes a calendar event, once per post."""
-    if DRY or not (HA and CALENDAR.get("entity")) or norm(collection) not in {norm(c) for c in CALENDAR.get("collections", [])}:
+    optional = norm(collection) in {norm(c) for c in CALENDAR.get("optional", [])}  # only its dated events, no warnings
+    if DRY or not (HA and CALENDAR.get("entity")) or not optional and norm(collection) not in {norm(c) for c in CALENDAR.get("collections", [])}:
+        return
+    if optional and (d.get("kind") != "event" or not event_times(d)):
         return
     if d.get("kind") != "event" or d.get("incomplete") or not (times := event_times(d)):
         notify("📅 No añadido al calendario", f"«{d.get('title')}» ({collection}) no tiene fecha y hora claras. {post_url}",
@@ -379,7 +440,7 @@ def sync(cl, state):
         state["ig_collections"] = {c.name.strip(): c.media_count for c in cols if c.name.strip() != "All posts"}  # every IG collection, for HA
         week = state.get("full_sync", "") < (dt.date.today() - dt.timedelta(days=7)).isoformat()
         for name, mode in COLLECTIONS:
-            pk = by_name.get(norm(name))
+            pk = by_name.get(norm(ig_name(name)))
             if not pk or not in_run(name):
                 continue
             c = state["collections"].setdefault(name, {"items": [], "baseline": None})
@@ -482,10 +543,11 @@ tags (one-word list)."""
 SCHEMA = {"type": "object",
           "required": ["relevant", "title", "one_liner", "url", "what", "fit", "steps", "effort", "value",
                        "claude", "ha", "pros", "cons", "where", "when", "kind", "price", "maps", "rating", "reviews",
-                       "quote", "artist", "song", "artist_url", "tour", "start", "end", "github", "signup", "format", "ingredients", "variants", "tags"],
+                       "quote", "artist", "song", "artist_url", "tour", "start", "end", "github", "signup", "format", "ingredients", "variants", "tags", "city", "studio", "credit"],
           "properties": {k: {"type": "string"} for k in ("title", "one_liner", "url", "what", "fit", "claude", "ha",
                                                          "where", "when", "price", "maps", "rating", "quote", "artist", "song",
-                                                         "artist_url", "start", "end", "github", "signup", "format")}
+                                                         "artist_url", "start", "end", "github", "signup", "format",
+                                                         "city", "studio", "credit")}
           | {k: {"type": "array", "items": {"type": "string"}} for k in ("pros", "cons", "reviews", "tour", "ingredients", "variants")}
           | {"relevant": {"type": "boolean"}, "steps": {"type": "array", "items": {"type": "string"}},
              "tags": {"type": "array", "items": {"type": "string"}},
@@ -561,6 +623,10 @@ def body_for(mode, d, post_url, pics=()):
     if mode == "personal":
         quote = "\n".join("> " + l if l.strip() else ">" for l in g("quote").splitlines()) if g("quote") else ""
         return head + (f"## Texto\n{quote}\n\n" if quote else "") + f"## Mensaje\n{g('what')}\n\n## Por qué resuena\n{g('fit')}\n\n- **Post:** {post}\n"
+    if mode == "growth":
+        quote = "\n".join("> " + l if l.strip() else ">" for l in g("quote").splitlines()) if g("quote") else ""
+        return head + (f"## La idea\n{g('what')}\n\n## Cómo aplicarlo\n{lst(d.get('steps')) or '—'}\n\n"
+                       f"## Para mí\n{g('fit') or '—'}\n\n" + (f"## Texto\n{quote}\n\n" if quote else "") + f"- **Post:** {post}\n")
     if mode == "music":
         q = urllib.parse.quote(f"{g('artist')} {g('song')}".strip())
         artist = f"[{g('artist') or '?'}]({g('artist_url')})" if g("artist_url").startswith("https://") else (g("artist") or "?")
@@ -576,8 +642,15 @@ def body_for(mode, d, post_url, pics=()):
         return head + (f"- **Artista:** {artist}\n- **Canción:** {g('song') or '?'}\n"
                        f"- **Escuchar:** {g('url') or f'https://open.spotify.com/search/{q}'}\n- **Post:** {post}\n\n{g('what')}\n"
                        f"{event}\n## Próximos conciertos en Europa\n{tour}\n")
+    if mode == "concert":
+        q = urllib.parse.quote(f"{g('artist')} {g('song')}".strip())
+        gig = g("concert") or " — ".join(x for x in (g("artist"), g("where") or g("city")) if x) or "?"
+        return head + (f"- **Concierto:** {gig}\n- **Cuándo:** {g('when') or '—'}\n- **Dónde:** {g('where') or '—'}\n"
+                       f"- **Canción:** {g('song') or '?'} · {g('artist') or '?'}\n"
+                       f"- **Escuchar:** {g('url') or f'https://open.spotify.com/search/{q}'}\n- **Post:** {post}\n\n"
+                       f"## El momento\n{g('what')}\n")
     if mode == "food":
-        ing = "\n".join(f"- {x}" for x in d.get("ingredients") or [] if x) or "—"
+        ing ="\n".join(f"- {x}" for x in d.get("ingredients") or [] if x) or "—"
         var = "\n".join(f"- {x}" for x in d.get("variants") or [] if x) or "_No se conocen otras versiones destacadas._"
         return head + (f"{g('what')}\n\n## Ingredientes\n{ing}\n\n## Preparación\n{lst(d.get('steps')) or '—'}\n\n"
                        f"## Otras versiones\n{var}\n\n" + (f"- **Receta de referencia:** {g('url')}\n" if g("url") else "")
@@ -591,6 +664,22 @@ def body_for(mode, d, post_url, pics=()):
                 (f"- **Dónde:** {g('where')}" + (f" · [Google Maps]({maps})" if maps else "")) * bool(g("where")),
                 f"- **Post:** {post}"]
         return head + "\n".join(r for r in rows if r) + f"\n\n## Qué es\n{g('what')}\n\n## Qué aprenderías\n{lst(d.get('steps')) or '—'}\n"
+    if mode == "odd":
+        text = "\n".join("> " + l if l.strip() else ">" for l in g("quote").splitlines()) if g("quote") else ""
+        return head + (f"{g('what')}\n\n" + (f"## Texto\n{text}\n\n" if text else "") +
+                       (f"## Transcripción\n{g('transcript')}\n\n" if g("transcript") else "") +
+                       (f"- **Enlace:** {g('url')}\n" if g("url") else "") + f"- **Post:** {post}\n")
+    if mode == "fun":
+        text = "\n".join("> " + l if l.strip() else ">" for l in g("quote").splitlines()) if g("quote") else ""
+        return head + (f"{text}\n\n" if text else "") + f"- **Post:** {post}\n"
+    if mode in ("tattoo", "art"):
+        artist = f"[{g('artist')}]({g('artist_url')})" if g("artist") and g("artist_url").startswith("https://") else (g("artist") or "?")
+        via = {"poster": "quien lo publicó", "caption": "mencionado en el texto", "tagged": "etiquetado"}.get(g("credit"))
+        maps = g("maps") if g("maps").startswith("https://") else ""
+        return head + (f"- **{'Artista' if mode == 'tattoo' else 'Autor'}:** {artist}" + (f" ({via})" if via else "") +
+                       f"\n- **{'Estudio' if mode == 'tattoo' else 'Galería / estudio'}:** {g('studio') or '—'}\n"
+                       f"- **Dónde:** {g('where') or '—'}" + (f" · [Google Maps]({maps})" if maps else "") +
+                       f"\n- **Post:** {post}\n\n{g('what')}\n")
     if mode == "general":
         text = "\n".join("> " + l if l.strip() else ">" for l in g("quote").splitlines()) if g("quote") else ""
         return head + (f"{g('what')}\n\n## Puntos clave\n{lst(d.get('steps')) or '—'}\n\n" + (f"## Texto\n{text}\n\n" if text else "")
@@ -652,7 +741,12 @@ def save_pictures(code, imgs, n=4):
 
 
 def write_note(mode, collection, d, post_url, brain, when, pics=()):
-    folder = os.path.join(BASE, MODES[mode]["folder"])
+    concert = CONCERTS.get(collection)
+    if concert:  # the concert's date and place come from config.json, Claude's guess only fills a gap
+        d = {**d, "concert": collection, **{k: concert[k] for k in ("when", "where") if concert.get(k)}}
+    sub = concert["folder"] if concert else slug(d["city"]) if mode == "concert" and d.get("city") else ""  # one folder per city
+    folder = os.path.join(BASE, MODES[mode]["folder"], *([sub] if sub else []))
+    collection = (concert or {}).get("as", collection)  # one-off concert collection filed as another (e.g. Sb -> Concerts)
     os.makedirs(folder, exist_ok=True)
     name = f"{when:%Y-%m-%d} {slug(d['title'])}.md"
     tags = ["instagram" if "instagram.com" in post_url else "enlace", mode] + [re.sub(r"\W", "", t.lower()) for t in d.get("tags") or [] if t]
@@ -665,6 +759,10 @@ def write_note(mode, collection, d, post_url, brain, when, pics=()):
         fm |= {"effort": d.get("effort", ""), "value": d.get("value", "")}
     if mode == "plan":
         fm |= {"where": d.get("where", ""), "when": d.get("when", ""), "price": d.get("price", ""), "rating": d.get("rating", "")}
+    if mode in ("tattoo", "art"):
+        fm |= {"artist": d.get("artist", ""), "studio": d.get("studio", ""), "where": d.get("where", ""), "city": d.get("city", "")}
+    if mode == "concert":
+        fm |= {"where": d.get("where", ""), "when": d.get("when", ""), "artist": d.get("artist", ""), "song": d.get("song", "")}
     if pics:
         fm["image"] = pics[0]
     front = "---\n" + "\n".join(f"{k}: {json.dumps(v, ensure_ascii=False)}" for k, v in fm.items()) + "\n---\n"
@@ -717,6 +815,23 @@ views:
         open(home, "w", encoding="utf-8").write(h)
 
 
+CREDIT_MODES = {"tattoo", "art"}  # modes that look for the author: the saved list lacks poster, tags and location
+
+
+def credits(cl, it):
+    """Poster, tagged accounts and location tag of the post (one read-only GET), as lines before the caption."""
+    try:
+        m = cl.media_info(int(it["pk"]))
+    except Exception as e:
+        log(f"{it['code']}: no post details ({type(e).__name__})")
+        return ""
+    tags = ", ".join("@" + t.user.username for t in m.usertags or [])
+    loc = m.location
+    place = ", ".join(x for x in (loc.name, getattr(loc, "address", "") or "", getattr(loc, "city", "") or "") if x) if loc else ""
+    return (f"Posted by: @{m.user.username}" + (f" ({m.user.full_name})" if m.user.full_name else "") +
+            f"\nTagged accounts: {tags or 'none'}\nLocation tag: {place or 'none'}\nCaption: ")
+
+
 def process(cl, collection, mode, it, done):
     post_url = f"https://www.instagram.com/{'reel' if it['type'] == 2 else 'p'}/{it['code']}/"
     tmp = tempfile.mkdtemp(prefix="insta_", dir=HERE)
@@ -734,7 +849,8 @@ def process(cl, collection, mode, it, done):
                 " — open them with the Read tool to read on-screen text.") if imgs else ""
         prompt = PROMPT.format(owner=OWNER, language=LANGUAGE, collection=collection,
                                task=MODES[mode]["task"].format(owner=OWNER, collection=collection), context=CONTEXT, post_url=post_url,
-                               caption=it["caption"] or "(none)", transcript=transcript.strip()[:6000] or "(no speech)",
+                               caption=(credits(cl, it) if mode in CREDIT_MODES else "") + (it["caption"] or "(none)"),
+                               transcript=transcript.strip()[:6000] or "(no speech)",
                                lang=lang, urls=", ".join(urls) or "none", frames_hint=hint)
         try:
             d, brain = ask_claude(prompt, tmp), "claude"
@@ -745,6 +861,8 @@ def process(cl, collection, mode, it, done):
             d, brain = ask_ollama(prompt.replace(hint, "Frames are attached as images.") if hint else prompt, imgs[:4]), "ollama"
         if mode in ("plan", "music") and d.get("kind") == "event" and not has_date(d.get("when")):
             d = ensure_event_date(d, prompt, tmp, brain)
+        if mode == "odd":
+            d["transcript"] = transcript.strip()  # the speech goes into the note as is
         done.add(it["pk"])
         if MODES[mode].get("skip_irrelevant") and not d.get("relevant", True):
             log(f"[{collection}] not relevant, skipped: {post_url} | {d.get('one_liner')}")
