@@ -786,8 +786,11 @@ def write_note(mode, collection, d, post_url, brain, when, pics=()):
     text = front + body_for(mode, d, post_url, pics) + f"\n---\nVolver a [[{MODES[mode]['folder']}]] · [[Home]]\n"
     if DRY:
         log("[dry-run] note:", os.path.join(folder, name)); print(text); return name
-    open(os.path.join(folder, name), "w", encoding="utf-8").write(text)
-    return name
+    path, i = os.path.join(folder, name), 2
+    while os.path.exists(path) and post_url not in open(path, encoding="utf-8").read():  # never overwrite another post's note
+        path = os.path.join(folder, f"{name[:-3]} ({i}).md"); i += 1
+    open(path, "w", encoding="utf-8").write(text)
+    return os.path.basename(path)
 
 
 def ensure_index(mode):
