@@ -124,7 +124,8 @@ played and its artist: the headliner in the concert name unless the post shows a
 on-screen text and lyrics in the transcript, and WebSearch that night's setlist (setlist.fm) if needed. Fill: artist,
 song, url = a direct Spotify track link you actually found (https://open.spotify.com/track/...), "" if none;
 what = one or two sentences on the moment the clip or photo shows. Never invent a song: if unsure, song = "" and
-say so in what. Also where the concert was, from the caption, location tag, on-screen text or the artist's tour dates
+say so in what. title = the song's name (e.g. "Schism"); if the song is unknown, a few words on what THIS clip shows
+(e.g. "Pantalla con el heptagrama antes del bis"), never a generic title like the artist or concert name. Also where the concert was, from the caption, location tag, on-screen text or the artist's tour dates
 (setlist.fm): city = just the city name (e.g. "San Bernardino"), where = venue, city and country, when = the date with
 year; "" for any you cannot confirm. setlist = that night's setlist in order, one song per item, from setlist.fm
 (a part like "Intermission" as its own item), and setlist_url = that setlist.fm page; [] and "" if you cannot find
