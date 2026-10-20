@@ -733,7 +733,7 @@ def process(cl, collection, mode, it, done):
         hint = ("Frames/photos are in the current folder: " + ", ".join(os.path.basename(i) for i in imgs[:6]) +
                 " — open them with the Read tool to read on-screen text.") if imgs else ""
         prompt = PROMPT.format(owner=OWNER, language=LANGUAGE, collection=collection,
-                               task=MODES[mode]["task"].format(owner=OWNER), context=CONTEXT, post_url=post_url,
+                               task=MODES[mode]["task"].format(owner=OWNER, collection=collection), context=CONTEXT, post_url=post_url,
                                caption=it["caption"] or "(none)", transcript=transcript.strip()[:6000] or "(no speech)",
                                lang=lang, urls=", ".join(urls) or "none", frames_hint=hint)
         try:

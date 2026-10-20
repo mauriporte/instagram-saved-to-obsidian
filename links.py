@@ -102,7 +102,7 @@ def analyse(url, collection=COLLECTION, mode="idea"):
                 " — open them with the Read tool to read on-screen text.") if imgs else ""
         caption = "\n".join(x for x in (title, desc[:2500]) if x) or "(none: open the link)"
         prompt = PROMPT.format(owner=ideas.OWNER, language=ideas.LANGUAGE, collection=collection,
-                               task=ideas.MODES[mode]["task"].format(owner=ideas.OWNER), context=ideas.CONTEXT,
+                               task=ideas.MODES[mode]["task"].format(owner=ideas.OWNER, collection=collection), context=ideas.CONTEXT,
                                post_url=url, caption=caption, transcript=transcript[:6000] or "(no speech / not a video)",
                                lang=lang, urls=", ".join(sorted(set(LINK_RE.findall(desc)))) or "none", frames_hint=hint)
         try:
