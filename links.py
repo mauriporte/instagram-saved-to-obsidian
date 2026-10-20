@@ -229,6 +229,26 @@ def heartbeat(st):
                 "lan": img.get("lan", "")}})  # e.g. http://<pc-ip>:8796, for viewers at home
     except Exception as e:
         log("[links] heartbeat error:", type(e).__name__)
+    try:
+        private_repos()
+    except Exception as e:
+        log("[links] private repos error:", type(e).__name__)
+
+
+def private_repos():
+    """sensor.repo_<name> for each local clone in config "private_repos" ([{"name", "path"}]): GitHub badges can't
+    see private repos, so the dashboard shows these instead (last commit, unpushed commits, uncommitted files)."""
+    for r in ideas.CFG.get("private_repos") or []:
+        git = lambda *a: subprocess.run(["git", "-C", r["path"], *a], capture_output=True, text=True, timeout=20,
+                                        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0)).stdout.strip()
+        when, msg = (git("log", "-1", "--format=%cI%x09%s").split("\t", 1) + [""])[:2]
+        ahead = git("rev-list", "--count", "@{u}..HEAD") or "?"
+        dirty = len([l for l in git("status", "--porcelain").splitlines() if l.strip()])
+        slug = re.sub(r"\W+", "_", r["name"].lower()).strip("_")
+        ha("POST", f"states/sensor.repo_{slug}", json={"state": when or "unknown", "attributes": {
+            "friendly_name": f"Repo {r['name']}", "device_class": "timestamp", "icon": "mdi:github",
+            "last_commit": msg, "unpushed": int(ahead) if ahead.isdigit() else None, "uncommitted": dirty,
+            "url": f"https://github.com/{r.get('owner', 'mauriporte')}/{r['name']}", "private": True}})
 
 
 LAST_START = [0.0]  # the new scan takes a few seconds to take its lock; don't start another meanwhile
@@ -294,9 +314,32 @@ def serve_images():
                         names.setdefault(x, os.path.join(d, x))
         return names.get(name, "")
 
+    reels = {}  # code -> (resolved at, video URL): Instagram's CDN links are signed and expire, so re-resolve after a while
+
+    def reel_url(code):
+        """Direct video URL of a public Instagram reel/post (yt-dlp, no login: the Insta-Ideas session isn't used)."""
+        t, url = reels.get(code, (0, ""))
+        if time.time() - t > 1200:
+            import yt_dlp
+            with yt_dlp.YoutubeDL({"quiet": True, "no_warnings": True, "skip_download": True, "format": "best[ext=mp4]/best"}) as y:
+                url = (y.extract_info(f"https://www.instagram.com/reel/{code}/", download=False) or {}).get("url", "")
+            reels[code] = (time.time(), url)
+        return url
+
     class H(BaseHTTPRequestHandler):
         def do_GET(self):
             rel = urllib.parse.unquote(urllib.parse.urlsplit(self.path).path)
+            m = re.fullmatch(re.escape(prefix) + r"reel/([\w-]{5,40})", rel)
+            if m:  # the Beeper chat card plays reels linked in messages: send the browser to the video itself
+                try:
+                    url = reel_url(m.group(1))
+                except Exception as e:
+                    log("[links] reel not resolved:", m.group(1), type(e).__name__)
+                    url = ""
+                if not url.startswith("https://"):
+                    self.send_error(404); return
+                self.send_response(302); self.send_header("Location", url); self.send_header("Cache-Control", "no-store")
+                self.end_headers(); return
             f = os.path.realpath(os.path.join(ideas.VAULT, rel.removeprefix(prefix)))
             if "/" not in rel.removeprefix(prefix):
                 f = os.path.realpath(by_name(rel.removeprefix(prefix)) or f)
