@@ -374,6 +374,15 @@ def publish_totals(st, rows):
 PENDING_CARD = "Pendientes por colección"
 
 
+def cards_in(card):
+    """The card and every card nested in it (stacks, conditional cards)."""
+    yield card
+    for c in card.get("cards", []):
+        yield from cards_in(c)
+    if isinstance(card.get("card"), dict):
+        yield from cards_in(card["card"])
+
+
 def ws_session():
     """An authenticated Home Assistant WebSocket (helpers and dashboards are only editable there)."""
     import websocket  # websocket-client
@@ -443,8 +452,10 @@ def sync_switches(names, labels, processed):
         if getattr(sync_switches, "last", None) == key:
             return
         cfg = call({"type": "lovelace/config", "url_path": dash})["result"]
-        card = next((c for v in cfg["views"] for s in v.get("sections", []) for c in s.get("cards", [])
-                     if c.get("type") == "entities" and c.get("title") == PENDING_CARD), None)
+        card = next((c for v in cfg["views"] for s in v.get("sections", []) for top in s.get("cards", []) for c in cards_in(top)
+                     if c.get("type") == "entities" and (c.get("title") == PENDING_CARD or any(
+                         str(r.get("entity", "")).startswith("input_boolean.insta_proc_") for r in c.get("entities", []) if isinstance(r, dict)))),
+                    None)  # by its rows: inside the collapsible stack the title lives in the heading
         if card is None:
             return
         rows = [{"entity": ent(n), "tap_action": {"action": "perform-action", "perform_action": "input_select.select_option",
