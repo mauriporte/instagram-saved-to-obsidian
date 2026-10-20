@@ -331,9 +331,9 @@ def publish_pending():
         rows.append({"c": name, "p": len(left) - aside, "f": aside, "t": sum(i["pk"] not in unsaved for i in items)})  # still saved on Instagram
     ig = st.get("ig_collections") or {}  # every Instagram collection with its saved count, from the last sync
     for r in rows:  # one sensor per collection, for the clickable list (a row selects that collection in the viewer)
-        total = ig.get(next((n for n in ig if ideas.norm(n) == ideas.norm(r["c"])), ""), r["t"])
+        # "de N" = our own still-saved count: Instagram's media_count lags behind unsaves
         ha("POST", f"states/sensor.insta_ideas_pendientes_{col_slug(r['c'])}", json={"state": r["p"], "attributes": {
-            "friendly_name": r["c"], "icon": "mdi:folder-clock-outline", "unit_of_measurement": f"de {total}",
+            "friendly_name": r["c"], "icon": "mdi:folder-clock-outline", "unit_of_measurement": f"de {r['t']}",
             "collection": r["c"], "set_aside": r["f"], "processed": True}})
     configured = {ideas.norm(r["c"]) for r in rows}
     for name, count in ig.items():  # Instagram collections Insta-Ideas doesn't process: just how many are saved
@@ -346,8 +346,7 @@ def publish_pending():
     labels = {}
     for n in names:
         r = by.get(ideas.norm(n))
-        total = ig.get(n, r["t"] if r else 0)
-        labels[n] = f"{n} · {r['p']} de {total}" if r else f"{n} · {ig.get(n, 0)} guardados"
+        labels[n] = f"{n} · {r['p']} de {r['t']}" if r else f"{n} · {ig.get(n, 0)} guardados"
     sync_switches(names, labels, set(by))  # first: a flipped switch updates the «Todas» list
     publish_totals(st, rows)
 
