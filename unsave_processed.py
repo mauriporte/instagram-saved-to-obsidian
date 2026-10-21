@@ -53,6 +53,8 @@ def main():
         ideas.log(f"[unsave-backlog] {len(todo)} processed posts still saved; this batch: {len(batch)}")
         if ideas.DRY:
             print([it["code"] for it in batch[:10]], "..."); return 0
+        # today's batch counts as started even if Instagram stops it halfway: never retry it the same day
+        json.dump({"day": ideas.dt.date.today().isoformat(), "left": len(todo)}, open(MARK, "w", encoding="utf-8"))
         ideas.AMIGABLE = True  # always the gentle pace for this
         cl = ideas.client() if batch else None
         done = 0
