@@ -51,7 +51,7 @@ def notes():
     out = []
     if os.path.isdir(IDEAS_DIR):
         for f in sorted(os.listdir(IDEAS_DIR)):
-            if f.endswith(".md"):
+            if f.endswith(".md") and ".sync-conflict-" not in f:
                 p = os.path.join(IDEAS_DIR, f); fm, title, _ = frontmatter(p)
                 if fm.get("type") == "idea":
                     out.append({"file": f, "path": p, "title": title, **fm})
@@ -219,7 +219,7 @@ def all_notes():
     for mode, m in ideas.MODES.items():
         for d, _, files in os.walk(os.path.join(ideas.BASE, m["folder"])):  # walk: concerts have one subfolder each
             for f in sorted(files):
-                if f.endswith(".md"):
+                if f.endswith(".md") and ".sync-conflict-" not in f:  # Syncthing's conflict copies are not ideas
                     fm, title, _ = frontmatter(os.path.join(d, f))
                     if fm.get("collection"):
                         out.append({"file": f, "path": os.path.join(d, f), "title": title, "mode": mode, **fm})
