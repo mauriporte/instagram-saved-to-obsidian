@@ -204,8 +204,8 @@ def unsave_backlog():
     """Once a day, while processed posts are still saved, run one unsave batch (unsave_processed.py) when no scan runs."""
     mark = os.path.join(ideas.HERE, "unsave_backlog.json")
     m = json.load(open(mark, encoding="utf-8")) if os.path.exists(mark) else {}
-    if m.get("left") == 0 or m.get("day") == dt.date.today().isoformat() or ideas.scan_running():
-        return
+    if m.get("left") == 0 or m.get("day") == dt.date.today().isoformat() or ideas.scan_running() or not ideas.unsave_on():
+        return  # «Quitar de guardados» off: the user unsaves by hand
     if time.time() - LAST_START[0] < 600:  # it takes the scan lock a few seconds after starting
         return
     LAST_START[0] = time.time()
