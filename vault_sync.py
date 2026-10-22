@@ -18,6 +18,8 @@ TODO = ideas.CFG.get("ideas_todo", "todo.ideas")
 IDEAS_DIR = os.path.join(ideas.BASE, ideas.MODES["idea"]["folder"])
 DASH = os.path.join(ideas.VAULT, "20-dashboards", "Dashboards.md")
 DONE = ("hecha", "descartada")
+READ = "leída"  # opened (Notes Vault) or «Leída» ticked: reviewed, kept, not completed
+ADD_PER_CYCLE = 40  # new items per cycle in the HA list: ~1,800 notes would otherwise hit HA all at once
 
 
 def frontmatter(path):
@@ -87,60 +89,86 @@ def sync_todo(items_notes, st):
         if m:
             by_note[m.group(1)] = it
     synced = set(st.get("synced", []))
+    added, present = 0, set(st.get("present", []))  # notes whose item was in the list on the previous cycle
+    gone = present - set(by_note)
+    if len(gone) > 5:  # a partial/empty answer from HA looks like mass deletion: trash nothing, look again next cycle
+        log(f"[vault] {len(gone)} list items missing at once: not treating them as deleted")
+        gone = set()
     for n in items_notes:
         it, status = by_note.get(n["file"]), n.get("status", "nueva")
         if it is None:
-            if n["file"] in cleared:
+            if n["file"] in cleared:  # removed with «Vaciar lista» earlier: every note belongs in the list, add it again
+                cleared.discard(n["file"]); synced.discard(n["file"])
+            if n["file"] in gone:  # its item was there last cycle and is gone now: deleted in HA → Eliminar
+                trash_note(n); synced.discard(n["file"])  # (Obsidian's trash, can be restored)
                 continue
-            if n["file"] in synced:  # deleted in HA → discarded
-                if status not in DONE:
-                    set_status(n["path"], "descartada")
+            if n["file"] in present:
+                continue  # missing in a suspicious batch: leave it alone this cycle
+            synced.discard(n["file"])  # gone for another reason (old «Vaciar lista», old discard...): never trash, re-add
+            if status == "descartada" or added >= ADD_PER_CYCLE:
                 continue
-            if status in DONE:
-                continue  # already closed before it reached the list
+            added += 1
             desc = "\n".join(x for x in (n.get("summary", ""), f"Esfuerzo: {n.get('effort') or '?'} · Valor: {n.get('value') or '?'}",
                                          n.get("url", ""), f"nota: {n['file']}") if x)
             ha("POST", "services/todo/add_item", json={"entity_id": TODO, "item": n["title"][:200], "description": desc})
-            synced.add(n["file"])
+            synced.add(n["file"])  # a «hecha» note gets ticked on the next cycle (needs the item's uid)
         else:
             synced.add(n["file"])
-            if it["status"] == "completed" and status not in DONE:
+            if it["status"] == "completed" and status != "hecha":
                 set_status(n["path"], "hecha")
-            elif it["status"] == "needs_action" and status in DONE:
+            elif it["status"] == "needs_action" and status == "hecha":
                 ha("POST", "services/todo/update_item", json={"entity_id": TODO, "item": it["uid"], "status": "completed"})
     st["synced"] = sorted(synced)
+    st["cleared"] = sorted(cleared)
+    st["present"] = sorted(set(by_note) | (present - gone if len(present - set(by_note)) > 5 else set()))
 
 
 CHECK = re.compile(r"^- \[( |x|X)\] Completada\s*$", re.M)
+CHECK_READ = re.compile(r"^- \[( |x|X)\] Leída\s*$", re.M)
+
+
+def new_status(status, done_box, read_box, prev_done, prev_read):
+    """The status after looking at a note's two boxes. A box the user just changed (vs the last look) wins;
+    otherwise the status stays (and the boxes are made to follow it). «Completada» implies read."""
+    if done_box != prev_done:
+        return "hecha" if done_box else (READ if read_box else "nueva")
+    if read_box != prev_read and status != "hecha":
+        return READ if read_box else "nueva"
+    return status
 
 
 def sync_checkboxes(st):
-    """Every note has a «- [ ] Completada» checkbox (Notes and Obsidian). Ticking or unticking it sets the note's status
-    ("hecha" / back to "nueva"); a status changed elsewhere (e.g. ticked in the Ideas list) ticks or unticks the box.
-    Notes without the box get it, ticked if already "hecha". st["checked"] remembers the last box state per note."""
-    checked = set(st.get("checked", []))
-    first = "checked" not in st
+    """Every note has «- [ ] Completada» and «- [ ] Leída» (Notes and Obsidian). Ticking/unticking them sets the
+    status (hecha / leída / nueva); a status changed elsewhere (Ideas list, opening the note in Notes Vault) moves the
+    boxes. Notes missing a box get it. st["checked"] / st["read"] remember the last box states per note."""
+    checked, read = set(st.get("checked", [])), set(st.get("read", []))
+    first = "read" not in st  # first run with two boxes: take the statuses as they are
     for n in all_notes():
         t = open(n["path"], encoding="utf-8").read()
-        m = CHECK.search(t)
-        done = n.get("status") == "hecha"
-        if not m:  # older note: add the box under the title
-            box = "- [x] Completada" if done else "- [ ] Completada"
-            t2 = re.sub(r"^(# .+\n)", lambda h: h.group(1) + "\n" + box + "\n", t, count=1, flags=re.M)
-            if t2 != t:
-                open(n["path"], "w", encoding="utf-8").write(t2)
-            (checked.add if done else checked.discard)(n["file"])
+        status = n.get("status", "nueva")
+        if not CHECK.search(t):  # older note: add the box under the title
+            t = re.sub(r"^(# .+\n)", lambda h: h.group(1) + "\n- [ ] Completada\n", t, count=1, flags=re.M)
+        if not CHECK_READ.search(t):
+            t = CHECK.sub(lambda m: m.group(0) + "\n- [ ] Leída", t, count=1)
+        m, r = CHECK.search(t), CHECK_READ.search(t)
+        if not m or not r:  # no title line to anchor the boxes: leave the note alone
             continue
-        box = m.group(1).lower() == "x"
-        if not first and box != (n["file"] in checked):  # the user ticked/unticked it
-            if box != done:
-                set_status(n["path"], "hecha" if box else "nueva")
-        elif box != done:  # status changed elsewhere: the box follows
-            t = t[:m.start()] + ("- [x] Completada" if done else "- [ ] Completada") + t[m.end():]
-            open(n["path"], "w", encoding="utf-8").write(t)
-            box = done
-        (checked.add if box else checked.discard)(n["file"])
-    st["checked"] = sorted(checked)
+        done_box, read_box = m.group(1).lower() == "x", r.group(1).lower() == "x"
+        if not first:
+            want = new_status(status, done_box, read_box, n["file"] in checked, n["file"] in read)
+            if want != status:
+                if CHECK.search(open(n["path"], encoding="utf-8").read()) is None:
+                    open(n["path"], "w", encoding="utf-8").write(t)  # keep the boxes just added before set_status rewrites
+                set_status(n["path"], want); status = want
+                t = open(n["path"], encoding="utf-8").read()  # with the new status and «updated» date
+        done, rd = status == "hecha", status in ("hecha", READ)
+        t2 = CHECK.sub("- [x] Completada" if done else "- [ ] Completada", t, count=1)
+        t2 = CHECK_READ.sub("- [x] Leída" if rd else "- [ ] Leída", t2, count=1)
+        if t2 != open(n["path"], encoding="utf-8").read():
+            open(n["path"], "w", encoding="utf-8").write(t2)
+        (checked.add if done else checked.discard)(n["file"])
+        (read.add if rd else read.discard)(n["file"])
+    st["checked"], st["read"] = sorted(checked), sorted(read)
 
 
 def publish_sensor(st):
@@ -151,8 +179,7 @@ def publish_sensor(st):
     if not ideas.HA:
         return
     every = all_notes()
-    reviewed = set(st.get("reviewed", []))
-    pend = sorted((n for n in every if n.get("status", "nueva") not in DONE and n["file"] not in reviewed),
+    pend = sorted((n for n in every if n.get("status", "nueva") == "nueva"),  # never opened, never marked
                   key=lambda n: (n.get("created", ""), n["file"]), reverse=True)
     rel = lambda n: os.path.relpath(n["path"], ideas.VAULT).replace(os.sep, "/")
     items = [{"title": n["title"], "summary": n.get("summary", ""), "effort": n.get("effort", ""), "value": n.get("value", ""),
@@ -624,7 +651,7 @@ def run():
         pass
     ns = notes()
     try:
-        sync_todo(ns, st)
+        sync_todo(all_notes(), st)
     except Exception as e:
         log("[vault] todo sync error:", type(e).__name__, e)
     ns = notes()  # statuses may have changed

@@ -53,6 +53,9 @@ cp config.example.json config.json   # then edit it
 
 - **Instagram session**: log into instagram.com in your browser, copy the `sessionid` cookie and run
   `python import_session.py`. (`login.py` does a username/password/2FA login instead; the password is not saved.)
+  **Recommended:** be signed out of every other Instagram session first — the mobile app, other browsers and any other
+  Instagram integration (Beeper, for example). Several sessions reading at once is what gets an account flagged and the
+  session cut off.
 - **Claude Code** must be installed and logged in (`claude` on PATH). Ollama is optional.
 - **Home Assistant** (optional): a long-lived token in the environment variable named in
   `home_assistant.token_env` (default `HA_TOKEN`).
