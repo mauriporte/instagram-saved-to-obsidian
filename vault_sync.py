@@ -38,12 +38,13 @@ def frontmatter(path):
     return fm, title, t
 
 
-def set_status(path, status):
+def set_status(path, status, quiet=False):
     fm, _, t = frontmatter(path)
     t = re.sub(r'^status: .*$', f'status: "{status}"', t, count=1, flags=re.M)
     t = re.sub(r'^updated: .*$', f'updated: "{ideas.dt.date.today():%Y-%m-%d}"', t, count=1, flags=re.M)
     open(path, "w", encoding="utf-8").write(t)
-    log(f"[vault] {os.path.basename(path)} -> {status}")
+    if not quiet:
+        log(f"[vault] {os.path.basename(path)} -> {status}")
 
 
 def notes():
@@ -73,15 +74,12 @@ def sync_todo(items_notes, st):
     items = (r.json().get("service_response") or {}).get(TODO, {}).get("items", [])
     cleared = set(st.get("cleared", []))  # removed with «Vaciar lista»: the notes keep their status, they don't come back
     btn = ha("GET", f"states/{CLEAR_BTN}")
-    if btn.ok and pressed_since(btn, "clear_seen", st, lambda s: None):
-        for it in items:
-            m = re.search(r"nota: (.+\.md)\s*$", it.get("description") or "")
-            if m:
-                cleared.add(m.group(1))
-        ha("POST", "services/todo/remove_item", json={"entity_id": TODO, "item": [it["uid"] for it in items]})
-        st["reviewed"] = sorted(set(st.get("reviewed", [])) | {n["file"] for n in all_notes()})  # «Ideas nuevas» back to 0
-        log(f"[vault] Ideas list emptied: {len(items)} items (notes unchanged)")
-        items = []
+    if btn.ok and pressed_since(btn, "clear_seen", st, lambda s: None):  # hold «Ideas nuevas»: every new note → read
+        fresh = [n for n in items_notes if n.get("status", "nueva") == "nueva"]
+        for n in fresh:
+            set_status(n["path"], READ, quiet=True)
+            n["status"] = READ
+        log(f"[vault] {len(fresh)} new ideas marked as read («Ideas nuevas» → 0)")
     st["cleared"] = sorted(cleared)
     by_note = {}
     for it in items:
