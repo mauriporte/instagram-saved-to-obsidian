@@ -31,7 +31,8 @@ def frontmatter(path):
         if k:
             v = k.group(2).strip()
             try:
-                fm[k.group(1)] = json.loads(v) if v[:1] in '"[' else v
+                # Notes Vault rewrites the frontmatter with YAML single quotes ('2026-10-21')
+                fm[k.group(1)] = json.loads(v) if v[:1] in '"[' else v[1:-1].replace("''", "'") if v[:1] == v[-1:] == "'" and len(v) > 1 else v
             except ValueError:
                 fm[k.group(1)] = v.strip('"')
     title = (re.search(r"^# (.+)$", t, re.M) or [None, os.path.splitext(os.path.basename(path))[0]])[1]
@@ -252,8 +253,17 @@ def relocate(notes_):
     return moved
 
 
-def label(n):
-    return f"{n['title']} · {n.get('created', '')}"[:250]  # name first: the dropdown is narrow
+def numbered_titles(notes_):
+    """{note path: title}, with the 2nd, 3rd… note of the same title (oldest first) shown as "Title (2)", "Title (3)"."""
+    out, seen = {}, {}
+    for n in sorted(notes_, key=lambda n: (n.get("created", ""), n["file"])):
+        seen[n["title"]] = seen.get(n["title"], 0) + 1
+        out[n["path"]] = n["title"] if seen[n["title"]] == 1 else f"{n['title']} ({seen[n['title']]})"
+    return out
+
+
+def label(n, title=None):
+    return f"{title or n['title']} · {n.get('created', '')}"[:250]  # name first: the dropdown is narrow
 
 
 def check_move(st, save):
@@ -268,7 +278,10 @@ def check_move(st, save):
     viewed = view.json()["state"]
     notes_ = [n for n in all_notes() if n["collection"] == viewed]
     notes_.sort(key=lambda n: (n.get("created", ""), n["file"]), reverse=True)
-    labels = [label(n) for n in notes_] or ["(sin notas)"]
+    titles = numbered_titles(notes_)  # HA refuses the whole list if two options are equal
+    labels = [label(n, titles[n["path"]]) for n in notes_]
+    by_label = dict(zip(labels, notes_))
+    labels = labels or ["(sin notas)"]
     if idea_sel.json()["attributes"].get("options") != labels:
         ha("POST", "services/input_select/set_options", json={"entity_id": MOVE_IDEA, "options": labels})
     names = view.json()["attributes"].get("options") or []
@@ -276,7 +289,7 @@ def check_move(st, save):
     if to_sel.json()["attributes"].get("options") != targets:
         ha("POST", "services/input_select/set_options", json={"entity_id": MOVE_TO, "options": targets})
     chosen, target = idea_sel.json()["state"], to_sel.json()["state"]
-    n = next((x for x in notes_ if label(x) == chosen), None)
+    n = by_label.get(chosen)
     if pressed_since(btn, "move_seen", st, save) and n and target != n["collection"]:
         set_field(n["path"], "collection", target)
         n["collection"] = target
@@ -500,11 +513,15 @@ def publish_collections():
     if not ideas.HA:
         return
     relocate(all_notes())  # collection edited in Obsidian: the file goes to that collection's folder first
-    groups = {}
-    for n in all_notes():
+    groups, by_col = {}, {}
+    notes_ = all_notes()
+    for n in notes_:
+        by_col.setdefault(n["collection"], []).append(n)
+    titles = {p: t for ns in by_col.values() for p, t in numbered_titles(ns).items()}  # same as «Idea a mover»
+    for n in notes_:
         rel = os.path.relpath(os.path.dirname(n["path"]), ideas.VAULT).replace(os.sep, "/")
         groups.setdefault(n["collection"], []).append({
-            "t": n["title"], "s": (n.get("summary") or "")[:110], "d": n.get("created", ""),
+            "t": titles[n["path"]], "s": (n.get("summary") or "")[:110], "d": n.get("created", ""),
             "st": n.get("status", ""), "p": f"{rel}/{n['file']}"})
     order = [n for n, _ in ideas.COLLECTIONS] + sorted(set(groups) - {n for n, _ in ideas.COLLECTIONS})
     configured = {n for n, _ in ideas.COLLECTIONS}
