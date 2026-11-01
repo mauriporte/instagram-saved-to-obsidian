@@ -931,7 +931,7 @@ def unsave_on():
 
 def unsave(cl, it):
     """Removes the post from Instagram's saved posts entirely (every collection and «All saved posts»)."""
-    time.sleep(random.uniform(4, 10))  # gentle pace: write actions are what Instagram watches for automation
+    time.sleep(random.uniform(*CFG.get("unsave_gap_s", [4, 10])))  # write actions are what Instagram watches for automation
     try:
         cl.media_unsave(cl.media_id(it["pk"]))
         log(f"unsaved from Instagram: {it['code']}")
