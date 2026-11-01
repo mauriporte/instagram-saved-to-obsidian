@@ -15,7 +15,7 @@ import requests
 HERE = os.path.dirname(os.path.abspath(__file__))
 CFG = json.load(open(os.path.join(HERE, "config.json"), encoding="utf-8")).get("spotify") or {}
 TOKEN = os.path.join(HERE, "spotify_token.json")
-SCOPES = "user-follow-read user-follow-modify user-library-modify"
+SCOPES = "user-follow-read user-follow-modify user-library-read user-library-modify playlist-modify-private"
 
 
 def login():
