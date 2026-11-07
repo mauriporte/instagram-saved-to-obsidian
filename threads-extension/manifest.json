@@ -1,0 +1,9 @@
+{
+  "manifest_version": 3,
+  "name": "Threads-Ideas",
+  "version": "1.2",
+  "description": "Reads your Threads saved posts for Threads-Ideas (the helper on this computer, 127.0.0.1:8796) and unsaves the ones that already have a note.",
+  "background": { "service_worker": "background.js" },
+  "permissions": ["alarms", "tabs", "scripting", "storage"],
+  "host_permissions": ["http://127.0.0.1:8796/*", "https://www.threads.com/*"]
+}
