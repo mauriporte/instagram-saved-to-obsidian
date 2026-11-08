@@ -1,7 +1,6 @@
 # personal / secrets
 config.json
 session.json
-threads_session.json
 state.json
 links_state.json
 vault_sync_state.json
