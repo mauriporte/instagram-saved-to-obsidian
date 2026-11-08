@@ -105,12 +105,7 @@ def analyse(url, collection=COLLECTION, mode="idea"):
                                task=ideas.MODES[mode]["task"].format(owner=ideas.OWNER, collection=collection), context=ideas.CONTEXT,
                                post_url=url, caption=caption, transcript=transcript[:6000] or "(no speech / not a video)",
                                lang=lang, urls=", ".join(sorted(set(LINK_RE.findall(desc)))) or "none", frames_hint=hint)
-        try:
-            d, brain = ideas.ask_claude(prompt, tmp), "claude"
-        except Exception as e:
-            log("[links] Claude unavailable -> Ollama:", e)
-            ideas._whisper = None
-            d, brain = ideas.ask_ollama(prompt.replace(hint, "Frames are attached as images.") if hint else prompt, imgs[:4]), "ollama"
+        d, brain = ideas.think(prompt, tmp, imgs, hint)
         if mode in ("plan", "music") and d.get("kind") == "event" and not ideas.has_date(d.get("when")):
             d = ideas.ensure_event_date(d, prompt, tmp, brain)  # an event without a date is incomplete
         d["title"] = d.get("title") or d.get("one_liner") or url
@@ -277,6 +272,10 @@ def main():
             unsave_backlog()
         except Exception as e:
             log("[links] unsave backlog error:", type(e).__name__)
+        try:
+            ideas.learn.daily(["insta-ideas", "threads-ideas"])  # once a day: which notes the owner edited, moved or deleted
+        except Exception as e:
+            log("[links] learn signals error:", type(e).__name__, e)
         if "--once" in sys.argv:
             return
         for _ in range(max(1, int(CFG.get("interval", 120)) // 10)):  # the scan button is checked every 10 s

@@ -48,6 +48,9 @@ HA = CFG.get("home_assistant", {}).get("url")       # optional
 HA_TOKEN_ENV = CFG.get("home_assistant", {}).get("token_env", "HA_TOKEN")
 OLLAMA = CFG.get("ollama", {}).get("url", "http://localhost:11434")
 OLLAMA_MODEL = CFG.get("ollama", {}).get("model", "qwen3:8b")
+BRAIN = CFG.get("brain", "claude")  # "ollama" = local model only, no Claude attempt (works without a Claude plan)
+import learn  # noqa: E402  (lessons in, owner-edit signals out; off unless config "learner_dir" is set)
+learn.configure(CFG.get("learner_dir"), VAULT)
 OWNER = CFG.get("owner", "The user")
 LANGUAGE = CFG.get("language", "English")
 CONTEXT = CFG.get("profile", "")                    # who you are / your setup, so ideas are judged for fit
@@ -543,6 +546,13 @@ what, fit, steps (list), effort (bajo|medio|alto|""), value (bajo|medio|alto|"")
 cons (list), where, when, kind (event|place|activity|""), price, maps, rating, reviews (list), quote, artist, song,
 tags (one-word list)."""
 
+def post_prompt(collection, mode, post_url, caption, transcript="", lang="?", urls=(), frames_hint=""):
+    return PROMPT.format(owner=OWNER, language=LANGUAGE, collection=collection,
+                         task=MODES[mode]["task"].format(owner=OWNER, collection=collection), context=CONTEXT,
+                         post_url=post_url, caption=caption or "(none)", transcript=transcript or "(no speech)",
+                         lang=lang, urls=", ".join(urls) or "none", frames_hint=frames_hint)
+
+
 SCHEMA = {"type": "object",
           "required": ["relevant", "title", "one_liner", "url", "what", "fit", "steps", "effort", "value",
                        "claude", "ha", "pros", "cons", "where", "when", "kind", "price", "maps", "rating", "reviews",
@@ -572,6 +582,19 @@ def ask_claude(prompt, workdir):
     if r.returncode != 0 or out.get("is_error") or not out.get("result"):
         raise RuntimeError(f"claude failed rc={r.returncode} {out.get('subtype')}: {(out.get('result') or r.stderr or r.stdout)[:300]}")
     return parse_json(out["result"])
+
+
+def think(prompt, workdir, imgs=(), hint="", job="insta-ideas"):
+    """One note's answer: the job's learned lessons are added; brain "ollama" never tries Claude."""
+    prompt += learn.lessons(job)
+    if BRAIN != "ollama":
+        try:
+            return ask_claude(prompt, workdir), "claude"
+        except Exception as e:
+            log("Claude unavailable -> Ollama:", str(e).replace("failed", "error"))  # pc_helper counts "failed" lines as lost posts
+    global _whisper
+    _whisper = None  # free VRAM for the LLM
+    return ask_ollama(prompt.replace(hint, "Frames are attached as images.") if hint else prompt, list(imgs)[:4]), "ollama"
 
 
 def ask_ollama(prompt, images):
@@ -758,7 +781,7 @@ def save_pictures(code, imgs, n=4):
     return out
 
 
-def write_note(mode, collection, d, post_url, brain, when, pics=()):
+def write_note(mode, collection, d, post_url, brain, when, pics=(), job="insta-ideas"):
     concert = CONCERTS.get(collection)
     if concert:  # the concert's date and place come from config.json, Claude's guess only fills a gap
         d = {**d, "concert": collection, **{k: concert[k] for k in ("when", "where", "setlist", "setlist_url", "links") if concert.get(k)}}
@@ -791,6 +814,10 @@ def write_note(mode, collection, d, post_url, brain, when, pics=()):
     while os.path.exists(path) and post_url not in open(path, encoding="utf-8").read():  # never overwrite another post's note
         path = os.path.join(folder, f"{name[:-3]} ({i}).md"); i += 1
     open(path, "w", encoding="utf-8").write(text)
+    try:
+        learn.record(job, path, post_url)
+    except Exception as e:
+        log("learn record error:", type(e).__name__, e)
     return os.path.basename(path)
 
 
@@ -877,19 +904,10 @@ def process(cl, collection, mode, it, done):
         urls = sorted(set(URL_RE.findall(it["caption"])))
         hint = ("Frames/photos are in the current folder: " + ", ".join(os.path.basename(i) for i in imgs[:6]) +
                 " — open them with the Read tool to read on-screen text.") if imgs else ""
-        prompt = PROMPT.format(owner=OWNER, language=LANGUAGE, collection=collection,
-                               task=MODES[mode]["task"].format(owner=OWNER, collection=collection), context=CONTEXT, post_url=post_url,
-                               caption=(credits(cl, it) if mode in CREDIT_MODES else "") + concert_info(collection)
-                               + (it["caption"] or "(none)"),
-                               transcript=transcript.strip()[:6000] or "(no speech)",
-                               lang=lang, urls=", ".join(urls) or "none", frames_hint=hint)
-        try:
-            d, brain = ask_claude(prompt, tmp), "claude"
-        except Exception as e:
-            log("Claude unavailable -> Ollama:", e)
-            global _whisper
-            _whisper = None  # free VRAM for the LLM
-            d, brain = ask_ollama(prompt.replace(hint, "Frames are attached as images.") if hint else prompt, imgs[:4]), "ollama"
+        prompt = post_prompt(collection, mode, post_url,
+                             (credits(cl, it) if mode in CREDIT_MODES else "") + concert_info(collection) + (it["caption"] or "(none)"),
+                             transcript.strip()[:6000], lang, urls, hint)
+        d, brain = think(prompt, tmp, imgs, hint)
         if mode in ("plan", "music") and d.get("kind") == "event" and not has_date(d.get("when")):
             d = ensure_event_date(d, prompt, tmp, brain)
         if mode == "odd":

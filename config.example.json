@@ -68,5 +68,7 @@
       "Note to self"
     ]
   },
-  "ideas_todo": "todo.ideas"
+  "ideas_todo": "todo.ideas",
+  "brain": "claude",
+  "learner_dir": null
 }

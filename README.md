@@ -35,6 +35,11 @@ numbered notes (`Schism`, `Schism (2)`…); a note is never overwritten by anoth
 3. **Brain** — [Claude Code](https://docs.anthropic.com/en/docs/claude-code) in headless mode
    (`claude -p` with a JSON schema, can web-search to confirm a repo or a place). If it fails, for example
    because you are out of usage, it falls back to a local model in [Ollama](https://ollama.com).
+   Set `"brain": "ollama"` to use only the local model (no Claude plan needed).
+   Optional self-learning (`"learner_dir"`): `learn.py` adds the lessons in `<learner_dir>/<job>/lessons.md` to every
+   prompt, records each note it writes, and once a day logs what you did to those notes (edited, ticked, moved,
+   deleted) to `<job>/signals.jsonl` for a nightly learner to turn into new lessons. `python learn.py eval <job>`
+   scores the model on `<job>/eval.jsonl` (with or without the lessons).
 4. **Output** — one Markdown note per post with front-matter, one index note per mode (an Obsidian `base`
    table), and one daily Home Assistant notification for `idea`/`plan` items.
 
