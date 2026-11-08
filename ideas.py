@@ -572,7 +572,10 @@ SCHEMA = {"type": "object",
 
 def ask_claude(prompt, workdir):
     cmd = [shutil.which("claude") or "claude", "-p", "--output-format", "json", "--max-turns", "20",
-           "--json-schema", json.dumps(SCHEMA), "--allowedTools", "Read", "WebSearch", "WebFetch",
+           "--json-schema", json.dumps(SCHEMA), "--allowedTools", "Read(./**)", "WebSearch", "WebFetch",
+           # post text is untrusted: no shell or file writes, and Read only inside this post's temp folder (its frames),
+           # so an injected caption cannot read a session/token file and send it out with WebFetch
+           "--disallowedTools", "Bash", "Edit", "Write", "NotebookEdit",
            "--strict-mcp-config", "--setting-sources", "project"]  # no user hooks/MCP servers in this headless run
     # prompt via stdin and no shell: cmd.exe mangled the long prompt / JSON schema quoting
     r = subprocess.run(cmd, cwd=workdir, input=prompt, capture_output=True, text=True, encoding="utf-8", timeout=900)
