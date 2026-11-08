@@ -65,9 +65,23 @@ def record(job, note_path, source):
     _save(job, index)
 
 
-def _signal(job, kind, detail):
+SCAN_AT = dt.time(3, 30)  # just before the nightly learner (04:00), which reads the 24 h before it
+
+
+def _when(path=None):
+    """When the owner's change happened: the file's last change (edit, or the move's new file); now if unknown."""
+    try:
+        st = os.stat(path)
+        return dt.datetime.fromtimestamp(max(st.st_mtime, st.st_ctime))
+    except (OSError, TypeError):
+        return dt.datetime.now()
+
+
+def _signal(job, kind, detail, when=None):
+    when = when or dt.datetime.now()
     with open(_path(job, "signals.jsonl"), "a", encoding="utf-8") as f:
-        f.write(json.dumps({"date": dt.date.today().isoformat(), "kind": kind, "detail": detail}, ensure_ascii=False) + "\n")
+        f.write(json.dumps({"date": when.date().isoformat(), "ts": when.isoformat(timespec="seconds"), "kind": kind,
+                            "detail": detail}, ensure_ascii=False) + "\n")
 
 
 def _changes(old, new):
@@ -105,7 +119,8 @@ def scan(jobs, today=None):
             if not os.path.exists(path):
                 elsewhere = [r for r in by_source.get(n["source"], []) if r != rel]
                 if elsewhere:
-                    _signal(job, "moved", f"«{title}» moved from {os.path.dirname(rel)} to {os.path.dirname(elsewhere[0])}")
+                    _signal(job, "moved", f"«{title}» moved from {os.path.dirname(rel)} to {os.path.dirname(elsewhere[0])}",
+                            _when(os.path.join(VAULT, elsewhere[0])))
                     new = elsewhere[0]
                     keep[new] = {**n, "sha": _sha(open(os.path.join(VAULT, new), encoding="utf-8").read())}
                 else:
@@ -116,9 +131,9 @@ def scan(jobs, today=None):
                 old = n.get("text")
                 status, edits = _changes(old, text) if old else ([], ["(previous text not kept)"])
                 if status:
-                    _signal(job, "status", f"«{title}»: " + "; ".join(status)[:300])
+                    _signal(job, "status", f"«{title}»: " + "; ".join(status)[:300], _when(path))
                 if edits:
-                    _signal(job, "edited", f"«{title}» edited by the owner:\n" + "\n".join(edits)[:800])
+                    _signal(job, "edited", f"«{title}» edited by the owner:\n" + "\n".join(edits)[:800], _when(path))
                 n = {**n, "sha": _sha(text)}
             if dt.date.fromisoformat(n["date"]) >= today - dt.timedelta(days=KEEP_DAYS):
                 keep[rel] = {**n, "text": text}  # keep the text so the next edit can be shown as a diff
@@ -126,13 +141,14 @@ def scan(jobs, today=None):
         _save(job, index)
 
 
-def daily(jobs):
-    """Run scan() at most once a day (called from the watcher loop)."""
+def daily(jobs, now=None):
+    """Run scan() once a day from SCAN_AT on (called from the watcher loop every couple of minutes)."""
     if not DIR:
         return
+    now = now or dt.datetime.now()
     last = min((_load(j).get("last_scan", "") for j in jobs), default="")
-    if last < dt.date.today().isoformat():
-        scan(jobs)
+    if now.time() >= SCAN_AT and last < now.date().isoformat():
+        scan(jobs, now.date())
 
 
 def run_eval(job, use_lessons=True):
