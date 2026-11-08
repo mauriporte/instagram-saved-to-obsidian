@@ -118,8 +118,9 @@ function stillSaved(code) {
 
 async function unsave(code) {
   const res = await withSavedTab(tabId => run(tabId, clickUnsave, [code, UNSAVE_LABELS]));
-  if (res !== "clicked") throw new Error(`unsave ${code}: ${res}`);
+  // null = the page reloaded mid-script (Threads can re-render /saved after the click): the check below decides
+  if (res !== "clicked" && res != null) throw new Error(`unsave ${code}: ${res}`);
   const gone = !(await withSavedTab(tabId => run(tabId, stillSaved, [code])));  // reload and check before telling pc_helper
-  if (!gone) throw new Error(`unsave ${code}: still saved after clicking`);
+  if (!gone) throw new Error(`unsave ${code}: still saved after clicking${res == null ? " (click script returned no result)" : ""}`);
   await fetch(`${HELPER}/threads/unsaved`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ code }) });
 }
